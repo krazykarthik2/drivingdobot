@@ -2,15 +2,13 @@
 Phase 4: Full Physical Simulation with Gripper Dynamics & 45-Degree Front Camera
 NanoDrive-4DOF (Residual / Delta Architecture)
 
-True Physics:
-- Powered by PyBullet rigid body dynamics with full collision checks.
-- Dynamic Gripper Physics:
-    * Gripper opens during approach.
-    * Clamps onto wrench/block at pick location with physical friction + constraint lock.
-    * Lifts the physical object into the air.
-    * Traverses trajectory (arcing over obstacle in Z, twisting wrist for oriented grip).
-    * Reopens gripper at target platform and drops object via gravity onto the destination.
-- Front 45-Degree Camera viewpoint.
+CORE PHILOSOPHY STRICTLY ENFORCED:
+System 0A (Base Solver) and System 0B (Neural Delta Driver) ONLY SEE PAINTED PIXELS on black.
+- Raw camera feed is completely discarded.
+- Neither System 0A nor System 0B has access to simulator state, ground truth coordinates, or physics bodies.
+- System 0A takes ONLY the painted pixel image, detects green & blue pixel blobs, converts to (X, Y) via camera homography, and computes the naive straight-line joint plan.
+- System 0B takes ONLY the painted pixel image + the naive joint plan, and outputs the corrective joint delta.
+- Final Action = Base Action + Delta Action.
 """
 
 import os
@@ -22,50 +20,43 @@ import torch
 
 from dobot_kinematics import DobotKinematics
 from dobot_physics_sim import DobotPybulletPhysicsSim
-from system0a_base_controller import System0ABaseController
+from system0a_base_controller import System0APaintedPixelSolver
 from system1_perception import System1PerceptionEngine, CameraProjector
 from system2_reasoning import System2ReasoningEngine
 from neural_delta_model import NeuralDeltaDriver
 from dobot_residual_env import DobotResidualSimEnv
 
-class PhysicalHybridController:
+class PureVisionHybridController:
+    """
+    Hybrid Controller strictly restricted to painted pixel inputs.
+    """
     def __init__(self, model_weights_path="dobot_delta_model.pt"):
         self.kin = DobotKinematics()
-        self.base_solver = System0ABaseController()
-        self.perception = System1PerceptionEngine(width=128, height=128)
-        self.reasoning = System2ReasoningEngine()
+        self.base_solver = System0APaintedPixelSolver()
         
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.delta_model = NeuralDeltaDriver().to(self.device)
         if os.path.exists(model_weights_path):
             self.delta_model.load_state_dict(torch.load(model_weights_path, map_location=self.device))
-            print(f"[Physical Controller] Loaded neural weights from {model_weights_path}")
+            print(f"[Pure Vision Controller] Loaded neural weights from {model_weights_path}")
         self.delta_model.eval()
 
-    def plan_trajectories(self, silhouette_128, start_pos, pick_pos, place_pos, num_steps=30):
-        half = num_steps // 2
-        naive_joints = []
-        naive_cart = []
+    def plan_from_painted_pixels_only(self, painted_image, num_steps=30):
+        """
+        INPUT: ONLY the painted pixel image (solid colored silhouettes on pitch-black).
+        NO ground-truth simulation positions or physics objects passed!
+        """
+        # 1. System 0A Base Solver looks ONLY at painted pixels:
+        base_plan = self.base_solver.generate_naive_plan_from_pixels(painted_image, num_steps=num_steps)
+        naive_joints = base_plan["naive_joints"]
+        naive_cart = base_plan["naive_cart"]
 
-        for i in range(half):
-            a = i / float(half - 1)
-            pt = (1 - a) * start_pos + a * pick_pos
-            j = self.kin.inverse(pt[0], pt[1], pt[2], 0.0)
-            naive_cart.append(np.array([pt[0], pt[1], pt[2], 0.0], dtype=np.float32))
-            naive_joints.append(j)
+        # Downsample painted pixels to 128x128 for System 0B Neural Delta Driver
+        painted_128 = cv2.resize(painted_image, (128, 128), interpolation=cv2.INTER_NEAREST)
 
-        for i in range(half):
-            a = i / float(half - 1)
-            pt = (1 - a) * pick_pos + a * place_pos
-            j = self.kin.inverse(pt[0], pt[1], pt[2], 0.0)
-            naive_cart.append(np.array([pt[0], pt[1], pt[2], 0.0], dtype=np.float32))
-            naive_joints.append(j)
-
-        naive_joints = np.array(naive_joints, dtype=np.float32)
-
-        # Neural Delta Driver inference
+        # 2. System 0B Neural Delta Driver looks ONLY at painted pixels + naive joint plan:
         img_tensor = torch.tensor(
-            silhouette_128.transpose(2, 0, 1).astype(np.float32) / 255.0,
+            painted_128.transpose(2, 0, 1).astype(np.float32) / 255.0,
             device=self.device
         ).unsqueeze(0).repeat(num_steps, 1, 1, 1)
 
@@ -75,6 +66,7 @@ class PhysicalHybridController:
             delta_tensor = self.delta_model(img_tensor, naive_tensor)
             delta_joints = delta_tensor.cpu().numpy()
 
+        # 3. Hybrid Combination: Final Action = Base Action + Delta Action
         hybrid_joints = naive_joints + delta_joints
         hybrid_cart = np.array([self.kin.forward(*j) for j in hybrid_joints], dtype=np.float32)
 
@@ -82,18 +74,20 @@ class PhysicalHybridController:
             "naive_joints": naive_joints,
             "delta_joints": delta_joints,
             "hybrid_joints": hybrid_joints,
-            "naive_cart": np.array(naive_cart),
-            "hybrid_cart": hybrid_cart
+            "naive_cart": naive_cart,
+            "hybrid_cart": hybrid_cart,
+            "pick_uv": base_plan["pick_uv"],
+            "place_uv": base_plan["place_uv"]
         }
 
 def run_physics_benchmark(output_video="nanodrive_physics_45deg_benchmark.mp4"):
     print("=" * 75)
-    print("NANODRIVE-4DOF FULL PHYSICAL DYNAMICS BENCHMARK WITH GRIPPER PHYSICS")
-    print("Front 45-Degree Camera | PyBullet Dynamic Grasping | Contact Detection")
+    print("NANODRIVE-4DOF BENCHMARK: STRICTLY PAINTED PIXELS ONLY FOR SYSTEM 0A & 0B")
+    print("Zero ground-truth simulator state leakage | Pure Silhouettes on Black | 45-Deg Camera")
     print("=" * 75)
 
     env = DobotResidualSimEnv()
-    controller = PhysicalHybridController()
+    controller = PureVisionHybridController()
     sim = DobotPybulletPhysicsSim(render_gui=False, width=640, height=480)
     
     writer = imageio.get_writer(output_video, fps=12, codec="libx264")
@@ -121,13 +115,18 @@ def run_physics_benchmark(output_video="nanodrive_physics_45deg_benchmark.mp4"):
             pick_type="wrench"
         )
 
-        plan = controller.plan_trajectories(sil_128, env.ee_pos[:3], pick_pos, place_pos, num_steps=30)
+        # GET PAINTED PIXEL IMAGE (System 1 output on pitch-black background)
+        # Pass ONLY this painted image to the controller!
+        painted_image = env.silhouette_full
+
+        plan = controller.plan_from_painted_pixels_only(painted_image, num_steps=30)
         naive_j = plan["naive_joints"]
         delta_j = plan["delta_joints"]
         hybrid_j = plan["hybrid_joints"]
         hybrid_c = plan["hybrid_cart"]
 
-        print(f"Pick Wrench Angle: {pick_angle:.1f}° | Obstacle Pos: {obs_pos[:2]}")
+        print(f"Detected Pick from Painted Pixels: {plan['pick_uv']}")
+        print(f"Detected Place from Painted Pixels: {plan['place_uv']}")
         print("Stepping physical simulation with active gripper dynamics and 45-degree front camera...")
 
         collision_count = 0
@@ -137,10 +136,7 @@ def run_physics_benchmark(output_video="nanodrive_physics_45deg_benchmark.mp4"):
         for step in range(total_steps):
             j = hybrid_j[step]
             
-            # Gripper control logic:
-            # Step 0 to half-1: approaching pick -> open gripper
-            # Step half-1 to total-2: grasping and transporting -> close gripper (clamp and lock)
-            # Step total-1: release at destination -> open gripper
+            # Gripper control: approaching -> open, grasping/carrying -> closed, arrival -> open
             if step < half_steps - 1:
                 gripper_close = False
             elif step >= half_steps - 1 and step < total_steps - 1:
@@ -161,7 +157,8 @@ def run_physics_benchmark(output_video="nanodrive_physics_45deg_benchmark.mp4"):
             canvas = np.zeros((480, 960, 3), dtype=np.uint8)
             canvas[:480, :640] = rgb_45
 
-            sil_preview = cv2.resize(env.silhouette_full, (280, 210))
+            # System 1 Painted Silhouettes on Black (The ONLY thing System 0A & 0B see)
+            sil_preview = cv2.resize(painted_image, (280, 210))
             canvas[20:230, 660:940] = sil_preview
             cv2.rectangle(canvas, (659, 19), (941, 231), (80, 80, 80), 1)
 
@@ -169,7 +166,7 @@ def run_physics_benchmark(output_video="nanodrive_physics_45deg_benchmark.mp4"):
             cv2.putText(canvas, "NANODRIVE-4DOF: 45-DEG FRONT CAMERA", (15, 28), font, 0.55, (0, 255, 255), 2)
             cv2.putText(canvas, f"INSTRUCTION: {instruction[:45]}...", (15, 50), font, 0.40, (220, 220, 220), 1)
 
-            cv2.putText(canvas, "SYSTEM 1: SILHOUETTES", (660, 15), font, 0.42, (0, 255, 0), 1)
+            cv2.putText(canvas, "SYSTEM 1: PAINTED PIXELS ONLY", (660, 15), font, 0.40, (0, 255, 0), 1)
             cv2.putText(canvas, "Green=Pick  Blue=Place  Red=Avoid", (660, 250), font, 0.38, (180, 180, 180), 1)
 
             cv2.putText(canvas, f"PHYSICS STEP: {step+1:02d}/30", (660, 280), font, 0.45, (255, 255, 255), 1)

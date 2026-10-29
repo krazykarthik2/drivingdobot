@@ -94,6 +94,12 @@ class DobotResidualSimEnv:
         # Parse instruction via System 2
         self.reasoning_targets = self.reasoning.parse_instruction(self.instruction)
 
+        # Ensure world objects reflect the parsed pick/place colors from the prompt
+        if "pick" in self.reasoning_targets and "color" in self.reasoning_targets["pick"]:
+            self.world_objects[0]["color"] = self.reasoning_targets["pick"]["color"]
+        if "place" in self.reasoning_targets and "color" in self.reasoning_targets["place"]:
+            self.world_objects[1]["color"] = self.reasoning_targets["place"]["color"]
+
         # Generate zero-background silhouette image via System 1
         self.silhouette_128, self.silhouette_full, self.meta = self.perception.segment_scene_to_silhouettes(
             None, self.world_objects, self.reasoning_targets
