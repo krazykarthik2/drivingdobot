@@ -195,19 +195,34 @@ class IntelligentSystem0ASolver:
         # --- Phase 2: Lift, Intelligent Obstacle Clearance & Place (Steps 15 to 29) ---
         for i in range(half):
             a = i / float(half - 1)
-            # Linear interpolation between pick and place
+            # Route in 3D:
+            # If obstacle present, add lateral curved detour away from obstacle (radius offset)
+            # plus elevated vertical arc so the path stays outside the cylinder radius
             x = (1.0 - a) * pick_pos[0] + a * place_pos[0]
             y = (1.0 - a) * pick_pos[1] + a * place_pos[1]
 
-            # Obstacle clearance Z profile:
-            # High clearance parabolic arc lifting object +0.100m over obstacles
-            arc_height = 0.100 * np.sin(np.pi * a) if has_obstacle else 0.050 * np.sin(np.pi * a)
-            z = pick_pos[2] + arc_height
+            if has_obstacle and obs_pos is not None:
+                # Add lateral deflection away from table center/obstacle (+0.035m outward detour)
+                normal_vec = np.array([-(place_pos[1] - pick_pos[1]), (place_pos[0] - pick_pos[0])])
+                norm_len = np.linalg.norm(normal_vec)
+                if norm_len > 1e-4:
+                    normal_vec /= norm_len
+                    # Detour curve
+                    detour = 0.035 * np.sin(np.pi * a) * normal_vec
+                    x += detour[0]
+                    y += detour[1]
 
-            # Maintain orientation during transfer, neutralize upon dropping
+            # Strong vertical clearance: stays high until right above the place zone
+            if a < 0.70:
+                # Lift & Cruise high
+                arc_height = 0.130 * np.sin(np.pi * (a / 0.70) * 0.5)
+                z = pick_pos[2] + arc_height
+            else:
+                # Descend vertically straight down into place zone (a: 0.70 -> 1.0)
+                desc_t = (a - 0.70) / 0.30
+                z = (1.0 - desc_t) * (pick_pos[2] + 0.130) + desc_t * place_pos[2]
+
             yaw = (1.0 - a) * pick_angle_rad
-
-            # Gripper holds object until last waypoint
             grip = (a < 0.95)
 
             pt = np.array([x, y, z, yaw], dtype=np.float32)

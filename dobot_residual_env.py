@@ -32,25 +32,19 @@ class DobotResidualSimEnv:
         pick_type = "wrench" if is_weird_shape else "cube"
         pick_color = "green"
         
-        # Dobot workspace bounds: R in [0.18, 0.27]
-        pick_rad = np.random.uniform(0.19, 0.26)
-        pick_th = np.random.uniform(-0.50, 0.50)
+        # Tabletop layout: Pick on one side, Place on other side, with realistic 16-20cm separation
+        pick_rad = np.random.uniform(0.20, 0.25)
+        pick_th = np.random.uniform(0.35, 0.60) # left side
         self.pick_pos = np.array([pick_rad * np.cos(pick_th), pick_rad * np.sin(pick_th), self.table_z], dtype=np.float32)
 
-        # Place target
+        # Place target on the right side
         place_color = "blue"
         place_type = "platform"
-        for _ in range(50):
-            place_rad = np.random.uniform(0.19, 0.26)
-            place_th = np.random.uniform(-0.50, 0.50)
-            cand = np.array([place_rad * np.cos(place_th), place_rad * np.sin(place_th), self.table_z], dtype=np.float32)
-            if np.linalg.norm(cand[:2] - self.pick_pos[:2]) > 0.11:
-                self.place_pos = cand
-                break
-        else:
-            self.place_pos = np.array([0.22, -0.11, self.table_z], dtype=np.float32)
+        place_rad = np.random.uniform(0.20, 0.25)
+        place_th = np.random.uniform(-0.60, -0.35) # right side
+        self.place_pos = np.array([place_rad * np.cos(place_th), place_rad * np.sin(place_th), self.table_z], dtype=np.float32)
 
-        # Obstacle placement exactly along path
+        # Obstacle placed at midpoint
         self.obstacles = []
         if add_obstacle:
             midpoint = (self.pick_pos + self.place_pos) / 2.0
