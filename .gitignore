@@ -8,3 +8,6 @@ frame_*.png
 aruco_debug_view.png
 aruco_calibrated_crop.png
 *.pkl
+
+dp3_official/*.ckpt*
+dp_libero_official/model.safetensors

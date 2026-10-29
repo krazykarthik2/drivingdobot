@@ -1,0 +1,67 @@
+{
+  "total_tasks": 10,
+  "successes": 0,
+  "success_ratio": 0.0,
+  "tasks": [
+    {
+      "task_idx": 1,
+      "instruction": "pick up the black bowl between the plate and the ramekin and place it on the plate",
+      "success": false,
+      "plan_time_ms": 11.24715805053711
+    },
+    {
+      "task_idx": 2,
+      "instruction": "pick up the black bowl next to the ramekin and place it on the plate",
+      "success": false,
+      "plan_time_ms": 3.0014514923095703
+    },
+    {
+      "task_idx": 3,
+      "instruction": "pick up the black bowl from table center and place it on the plate",
+      "success": false,
+      "plan_time_ms": 1.5087127685546875
+    },
+    {
+      "task_idx": 4,
+      "instruction": "pick up the black bowl on the cookie box and place it on the plate",
+      "success": false,
+      "plan_time_ms": 1.5075206756591797
+    },
+    {
+      "task_idx": 5,
+      "instruction": "pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate",
+      "success": false,
+      "plan_time_ms": 1.005411148071289
+    },
+    {
+      "task_idx": 6,
+      "instruction": "pick up the black bowl on the ramekin and place it on the plate",
+      "success": false,
+      "plan_time_ms": 0.9906291961669922
+    },
+    {
+      "task_idx": 7,
+      "instruction": "pick up the black bowl next to the cookie box and place it on the plate",
+      "success": false,
+      "plan_time_ms": 1.0857582092285156
+    },
+    {
+      "task_idx": 8,
+      "instruction": "pick up the black bowl on the stove and place it on the plate",
+      "success": false,
+      "plan_time_ms": 0.0
+    },
+    {
+      "task_idx": 9,
+      "instruction": "pick up the black bowl next to the plate and place it on the plate",
+      "success": false,
+      "plan_time_ms": 1.0094642639160156
+    },
+    {
+      "task_idx": 10,
+      "instruction": "pick up the black bowl on the wooden cabinet and place it on the plate",
+      "success": false,
+      "plan_time_ms": 0.0
+    }
+  ]
+}

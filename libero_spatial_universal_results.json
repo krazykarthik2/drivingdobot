@@ -1,0 +1,76 @@
+{
+  "suite": "libero_spatial",
+  "success_rate": 0.0,
+  "results": [
+    {
+      "task_id": 0,
+      "task_name": "pick_up_the_black_bowl_between_the_plate_and_the_ramekin_and_place_it_on_the_plate",
+      "success": false,
+      "delta_xy": 0.14203549871500948,
+      "time_sec": 34.45
+    },
+    {
+      "task_id": 1,
+      "task_name": "pick_up_the_black_bowl_next_to_the_ramekin_and_place_it_on_the_plate",
+      "success": false,
+      "delta_xy": 0.27230145638150544,
+      "time_sec": 35.92
+    },
+    {
+      "task_id": 2,
+      "task_name": "pick_up_the_black_bowl_from_table_center_and_place_it_on_the_plate",
+      "success": false,
+      "delta_xy": 0.2491738940687466,
+      "time_sec": 34.56
+    },
+    {
+      "task_id": 3,
+      "task_name": "pick_up_the_black_bowl_on_the_cookie_box_and_place_it_on_the_plate",
+      "success": false,
+      "delta_xy": 0.17258732079694486,
+      "time_sec": 33.95
+    },
+    {
+      "task_id": 4,
+      "task_name": "pick_up_the_black_bowl_in_the_top_drawer_of_the_wooden_cabinet_and_place_it_on_the_plate",
+      "success": false,
+      "delta_xy": 0.3390473046835669,
+      "time_sec": 34.31
+    },
+    {
+      "task_id": 5,
+      "task_name": "pick_up_the_black_bowl_on_the_ramekin_and_place_it_on_the_plate",
+      "success": false,
+      "delta_xy": 0.27808981839477315,
+      "time_sec": 36.22
+    },
+    {
+      "task_id": 6,
+      "task_name": "pick_up_the_black_bowl_next_to_the_cookie_box_and_place_it_on_the_plate",
+      "success": false,
+      "delta_xy": 0.06804848130197448,
+      "time_sec": 36.74
+    },
+    {
+      "task_id": 7,
+      "task_name": "pick_up_the_black_bowl_on_the_stove_and_place_it_on_the_plate",
+      "success": false,
+      "delta_xy": 0.4769981866372709,
+      "time_sec": 35.91
+    },
+    {
+      "task_id": 8,
+      "task_name": "pick_up_the_black_bowl_next_to_the_plate_and_place_it_on_the_plate",
+      "success": false,
+      "delta_xy": 0.11646286818886137,
+      "time_sec": 34.35
+    },
+    {
+      "task_id": 9,
+      "task_name": "pick_up_the_black_bowl_on_the_wooden_cabinet_and_place_it_on_the_plate",
+      "success": false,
+      "delta_xy": 0.5571203263834523,
+      "time_sec": 33.65
+    }
+  ]
+}

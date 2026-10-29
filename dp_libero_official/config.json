@@ -1,0 +1,66 @@
+{
+    "type": "multi_task_dit",
+    "n_obs_steps": 1,
+    "input_features": {
+        "observation.images.image": {
+            "type": "VISUAL",
+            "shape": [
+                3,
+                256,
+                256
+            ]
+        },
+        "observation.images.image2": {
+            "type": "VISUAL",
+            "shape": [
+                3,
+                256,
+                256
+            ]
+        },
+        "observation.state": {
+            "type": "STATE",
+            "shape": [
+                8
+            ]
+        }
+    },
+    "output_features": {
+        "action": {
+            "type": "ACTION",
+            "shape": [
+                7
+            ]
+        }
+    },
+    "device": "cuda",
+    "use_amp": false,
+    "use_peft": false,
+    "push_to_hub": false,
+    "repo_id": null,
+    "private": null,
+    "tags": null,
+    "license": null,
+    "pretrained_path": null,
+    "cond_dim": 256,
+    "vision_feature_dim": 384,
+    "text_feature_dim": 512,
+    "transformer_hidden_dim": 512,
+    "transformer_n_heads": 8,
+    "transformer_n_layers": 8,
+    "transformer_mlp_ratio": 4.0,
+    "transformer_time_embed_dim": 128,
+    "num_train_timesteps": 100,
+    "num_inference_steps": 25,
+    "beta_schedule": "squaredcos_cap_v2",
+    "prediction_type": "epsilon",
+    "horizon": 16,
+    "n_action_steps": 4,
+    "normalization_mapping": {
+        "VISUAL": "IDENTITY",
+        "STATE": "MEAN_STD",
+        "ACTION": "MIN_MAX"
+    },
+    "optimizer_lr": 0.0001,
+    "optimizer_weight_decay": 1e-06
+}

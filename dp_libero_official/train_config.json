@@ -1,0 +1,291 @@
+{
+    "dataset": {
+        "repo_id": "HuggingFaceVLA/libero",
+        "root": null,
+        "episodes": null,
+        "image_transforms": {
+            "enable": false,
+            "max_num_transforms": 3,
+            "random_order": false,
+            "tfs": {
+                "brightness": {
+                    "weight": 1.0,
+                    "type": "ColorJitter",
+                    "kwargs": {
+                        "brightness": [
+                            0.8,
+                            1.2
+                        ]
+                    }
+                },
+                "contrast": {
+                    "weight": 1.0,
+                    "type": "ColorJitter",
+                    "kwargs": {
+                        "contrast": [
+                            0.8,
+                            1.2
+                        ]
+                    }
+                },
+                "saturation": {
+                    "weight": 1.0,
+                    "type": "ColorJitter",
+                    "kwargs": {
+                        "saturation": [
+                            0.5,
+                            1.5
+                        ]
+                    }
+                },
+                "hue": {
+                    "weight": 1.0,
+                    "type": "ColorJitter",
+                    "kwargs": {
+                        "hue": [
+                            -0.05,
+                            0.05
+                        ]
+                    }
+                },
+                "sharpness": {
+                    "weight": 1.0,
+                    "type": "SharpnessJitter",
+                    "kwargs": {
+                        "sharpness": [
+                            0.5,
+                            1.5
+                        ]
+                    }
+                },
+                "affine": {
+                    "weight": 1.0,
+                    "type": "RandomAffine",
+                    "kwargs": {
+                        "degrees": [
+                            -5.0,
+                            5.0
+                        ],
+                        "translate": [
+                            0.05,
+                            0.05
+                        ]
+                    }
+                }
+            }
+        },
+        "revision": null,
+        "use_imagenet_stats": true,
+        "video_backend": "pyav",
+        "streaming": false
+    },
+    "env": {
+        "type": "libero",
+        "task": "libero_spatial",
+        "fps": 30,
+        "features": {
+            "action": {
+                "type": "ACTION",
+                "shape": [
+                    7
+                ]
+            },
+            "pixels/agentview_image": {
+                "type": "VISUAL",
+                "shape": [
+                    360,
+                    360,
+                    3
+                ]
+            },
+            "pixels/robot0_eye_in_hand_image": {
+                "type": "VISUAL",
+                "shape": [
+                    360,
+                    360,
+                    3
+                ]
+            },
+            "robot_state/eef/pos": {
+                "type": "STATE",
+                "shape": [
+                    3
+                ]
+            },
+            "robot_state/eef/quat": {
+                "type": "STATE",
+                "shape": [
+                    4
+                ]
+            },
+            "robot_state/eef/mat": {
+                "type": "STATE",
+                "shape": [
+                    3,
+                    3
+                ]
+            },
+            "robot_state/gripper/qpos": {
+                "type": "STATE",
+                "shape": [
+                    2
+                ]
+            },
+            "robot_state/gripper/qvel": {
+                "type": "STATE",
+                "shape": [
+                    2
+                ]
+            },
+            "robot_state/joints/pos": {
+                "type": "STATE",
+                "shape": [
+                    7
+                ]
+            },
+            "robot_state/joints/vel": {
+                "type": "STATE",
+                "shape": [
+                    7
+                ]
+            }
+        },
+        "features_map": {
+            "action": "action",
+            "robot_state/eef/pos": "observation.state.eef_pos",
+            "robot_state/eef/quat": "observation.state.eef_quat",
+            "robot_state/eef/mat": "observation.state.eef_mat",
+            "robot_state/gripper/qpos": "observation.state.gripper_qpos",
+            "robot_state/gripper/qvel": "observation.state.gripper_qvel",
+            "robot_state/joints/pos": "observation.state.joint_pos",
+            "robot_state/joints/vel": "observation.state.joint_vel",
+            "pixels/agentview_image": "observation.images.image",
+            "pixels/robot0_eye_in_hand_image": "observation.images.image2"
+        },
+        "max_parallel_tasks": 1,
+        "disable_env_checker": true,
+        "task_ids": null,
+        "episode_length": null,
+        "obs_type": "pixels_agent_pos",
+        "render_mode": "rgb_array",
+        "camera_name": "agentview_image,robot0_eye_in_hand_image",
+        "init_states": true,
+        "camera_name_mapping": null,
+        "observation_height": 360,
+        "observation_width": 360,
+        "control_mode": "relative"
+    },
+    "policy": {
+        "type": "text_diffusion",
+        "n_obs_steps": 1,
+        "input_features": {
+            "observation.images.image": {
+                "type": "VISUAL",
+                "shape": [
+                    3,
+                    256,
+                    256
+                ]
+            },
+            "observation.images.image2": {
+                "type": "VISUAL",
+                "shape": [
+                    3,
+                    256,
+                    256
+                ]
+            },
+            "observation.state": {
+                "type": "STATE",
+                "shape": [
+                    8
+                ]
+            }
+        },
+        "output_features": {
+            "action": {
+                "type": "ACTION",
+                "shape": [
+                    7
+                ]
+            }
+        },
+        "device": "cuda",
+        "use_amp": false,
+        "use_peft": false,
+        "push_to_hub": false,
+        "repo_id": null,
+        "private": null,
+        "tags": null,
+        "license": null,
+        "pretrained_path": null,
+        "cond_dim": 256,
+        "vision_feature_dim": 384,
+        "text_feature_dim": 512,
+        "transformer_hidden_dim": 512,
+        "transformer_n_heads": 8,
+        "transformer_n_layers": 8,
+        "transformer_mlp_ratio": 4.0,
+        "transformer_time_embed_dim": 128,
+        "num_train_timesteps": 100,
+        "num_inference_steps": 25,
+        "beta_schedule": "squaredcos_cap_v2",
+        "prediction_type": "epsilon",
+        "horizon": 16,
+        "n_action_steps": 4,
+        "normalization_mapping": {
+            "VISUAL": "IDENTITY",
+            "STATE": "MEAN_STD",
+            "ACTION": "MIN_MAX"
+        },
+        "optimizer_lr": 0.0001,
+        "optimizer_weight_decay": 1e-06
+    },
+    "output_dir": "outputs/text_diffusion_libero5",
+    "job_name": "text_diffusion_libero5",
+    "resume": false,
+    "seed": 1000,
+    "num_workers": 4,
+    "batch_size": 16,
+    "steps": 200000,
+    "eval_freq": 5000,
+    "log_freq": 200,
+    "tolerance_s": 0.0001,
+    "save_checkpoint": true,
+    "save_freq": 5000,
+    "use_policy_training_preset": true,
+    "optimizer": {
+        "type": "adam",
+        "lr": 0.0001,
+        "weight_decay": 1e-06,
+        "grad_clip_norm": 10.0,
+        "betas": [
+            0.9,
+            0.999
+        ],
+        "eps": 1e-08
+    },
+    "scheduler": null,
+    "eval": {
+        "n_episodes": 10,
+        "batch_size": 1,
+        "use_async_envs": false
+    },
+    "wandb": {
+        "enable": false,
+        "disable_artifact": false,
+        "project": "lerobot",
+        "entity": null,
+        "notes": null,
+        "run_id": null,
+        "mode": null
+    },
+    "peft": null,
+    "use_rabc": false,
+    "rabc_progress_path": null,
+    "rabc_kappa": 0.01,
+    "rabc_epsilon": 1e-06,
+    "rabc_head_mode": "sparse",
+    "rename_map": {},
+    "checkpoint_path": null
+}
