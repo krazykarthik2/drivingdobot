@@ -101,14 +101,14 @@ class System1PerceptionEngine:
     Translates raw camera input and System 2 semantic labels into pure zero-background
     solid colored silhouettes:
       - GREEN (0, 255, 0): Pick target shape (e.g. wrench, block)
-      - BLUE (0, 0, 255) / (255, 0, 0): Place target shape (e.g. bin, platform)
-      - RED (255, 0, 0) / (0, 0, 255): Obstacle shape (e.g. cup, barrier)
+      - BLUE (255, 0, 0): Place target shape (e.g. bin, platform)
+      - RED (0, 0, 255): Obstacle shape (e.g. cup, barrier)
     Pitch-black background (0, 0, 0).
     """
-    def __init__(self, width=128, height=128):
+    def __init__(self, width=128, height=128, table_z=0.070):
         self.out_w = width
         self.out_h = height
-        self.projector = CameraProjector(width=640, height=480)
+        self.projector = CameraProjector(width=640, height=480, table_z=table_z)
 
     def segment_scene_to_silhouettes(self, raw_img, world_objects, reasoning_target):
         """
