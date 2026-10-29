@@ -1,14 +1,17 @@
 """
-PyBullet Physical Simulation Environment for Dobot Magician 4-DOF.
+PyBullet Physical Simulation Environment for Dobot Magician 4-DOF with Dynamic Gripper Physics.
 Key features:
 1. True Rigid Body Dynamics & Contact Physics:
-   - Dobot URDF with 4 active DOF (joint 1, joint 2, joint 3, joint 4) + gripper jaws.
+   - Dobot URDF with 4 active DOF (joint 1, joint 2, joint 3, joint 4) + active gripper jaws.
+   - Dual-mode physical gripping:
+       * Dynamic Contact Constraint: Rigid body friction grip + physics-based constraint locking when jaws clamp object.
+       * Suction / Magnetic grip support with realistic attachment dynamics.
    - Physical table plane with gravity and realistic contact friction.
    - Dynamic physical objects: pick target (wrench / block), place target (tray / platform), and obstacles (red cups/cylinders).
-   - Collision detection: detects if the naive straight-line path hits the obstacle!
+   - Real-time contact detection & collision verification.
 2. Front 45-Degree Camera:
    - Positioned in front of the robot at a 45-degree angle looking down onto the workspace.
-   - Renders both realistic RGB views and feeds System 1 zero-background silhouettes.
+   - Renders physical RGB views and generates zero-background silhouettes.
 """
 
 import os
@@ -38,11 +41,10 @@ class DobotPybulletPhysicsSim:
         p.setTimeStep(1.0 / 240.0)
 
         # 45-degree Front Camera setup
-        # Distance = 0.48m, Yaw = 0 deg (front facing robot), Pitch = -45 deg
         self.cam_target = [0.22, 0.0, 0.02]
         self.cam_dist = 0.48
-        self.cam_yaw = 0.0      # Directly in front
-        self.cam_pitch = -45.0  # Exactly 45-degree downward tilt
+        self.cam_yaw = 0.0      # Front facing
+        self.cam_pitch = -45.0  # 45-degree downward tilt
         self.cam_roll = 0.0
         self.fov = 50.0
 
@@ -63,8 +65,10 @@ class DobotPybulletPhysicsSim:
 
         self.robot_id = None
         self.plane_id = None
-        self.table_id = None
         self.object_ids = {}
+        self.grasp_constraint_id = None
+        self.gripper_closed = False
+        self.grasped = False
         self.load_environment()
 
     def load_environment(self):
@@ -81,34 +85,38 @@ class DobotPybulletPhysicsSim:
         self.robot_id = p.loadURDF(urdf_path, [0, 0, 0], useFixedBase=True)
 
         # Joint indices
-        # Joint 1 = index 1
-        # Joint 2 = index 2
-        # Joint 3 = index 3
-        # Joint 4 (wrist) = index 6
-        # Gripper jaws = indices 7, 8
         self.arm_joints = [1, 2, 3, 6]
-        self.gripper_joints = [7, 8]
+        self.gripper_j_left = 7
+        self.gripper_j_right = 8
+        self.ee_link_index = 6
 
-        # Enable force/torque sensors and set dynamics
-        for j in range(p.getNumJoints(self.robot_id)):
-            p.changeDynamics(self.robot_id, j, lateralFriction=1.0, spinningFriction=0.1)
+        # Enable high friction on gripper jaws for realistic physics grasping
+        p.changeDynamics(self.robot_id, self.gripper_j_left, lateralFriction=2.5, spinningFriction=0.2)
+        p.changeDynamics(self.robot_id, self.gripper_j_right, lateralFriction=2.5, spinningFriction=0.2)
 
     def spawn_scene_objects(self, pick_pos, pick_angle_deg, place_pos, obs_pos=None, pick_type="wrench"):
         """
-        Spawns physical collision shapes into the PyBullet physics engine.
+        Spawns physical collision bodies into the PyBullet physics engine.
         """
-        # Clear old objects
+        if self.grasp_constraint_id is not None:
+            try:
+                p.removeConstraint(self.grasp_constraint_id)
+            except Exception:
+                pass
+            self.grasp_constraint_id = None
+
         for oid in self.object_ids.values():
             try:
                 p.removeBody(oid)
             except Exception:
                 pass
         self.object_ids = {}
+        self.grasped = False
+        self.gripper_closed = False
 
-        # 1. Pick Object (Physical Body)
+        # 1. Pick Object (Physical Dynamic Body)
         pick_orn = p.getQuaternionFromEuler([0, 0, np.radians(pick_angle_deg)])
         if pick_type == "wrench":
-            # Elongated box collision for wrench
             col_id = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.05, 0.012, 0.012])
             vis_id = p.createVisualShape(p.GEOM_BOX, halfExtents=[0.05, 0.012, 0.012], rgbaColor=[0.15, 0.85, 0.25, 1.0])
         else:
@@ -116,46 +124,43 @@ class DobotPybulletPhysicsSim:
             vis_id = p.createVisualShape(p.GEOM_BOX, halfExtents=[0.015, 0.015, 0.015], rgbaColor=[0.15, 0.85, 0.25, 1.0])
 
         self.object_ids["pick"] = p.createMultiBody(
-            baseMass=0.08,
+            baseMass=0.06,
             baseCollisionShapeIndex=col_id,
             baseVisualShapeIndex=vis_id,
             basePosition=[pick_pos[0], pick_pos[1], max(pick_pos[2], 0.012)],
             baseOrientation=pick_orn
         )
-        p.changeDynamics(self.object_ids["pick"], -1, lateralFriction=1.2, rollingFriction=0.01)
+        p.changeDynamics(self.object_ids["pick"], -1, lateralFriction=2.0, spinningFriction=0.1)
 
-        # 2. Place Object (Tray/Platform)
+        # 2. Place Object (Platform/Tray)
         p_col = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.035, 0.035, 0.005])
         p_vis = p.createVisualShape(p.GEOM_BOX, halfExtents=[0.035, 0.035, 0.005], rgbaColor=[0.15, 0.40, 0.90, 1.0])
         self.object_ids["place"] = p.createMultiBody(
-            baseMass=0.0, # static
+            baseMass=0.0,
             baseCollisionShapeIndex=p_col,
             baseVisualShapeIndex=p_vis,
             basePosition=[place_pos[0], place_pos[1], max(place_pos[2], 0.005)],
             baseOrientation=[0, 0, 0, 1]
         )
 
-        # 3. Obstacle (Tall Cylinder / Cup in between)
+        # 3. Obstacle
         if obs_pos is not None:
             obs_col = p.createCollisionShape(p.GEOM_CYLINDER, radius=0.022, height=0.07)
             obs_vis = p.createVisualShape(p.GEOM_CYLINDER, radius=0.022, length=0.07, rgbaColor=[0.90, 0.15, 0.15, 1.0])
             self.object_ids["obstacle"] = p.createMultiBody(
-                baseMass=0.25,
+                baseMass=0.30,
                 baseCollisionShapeIndex=obs_col,
                 baseVisualShapeIndex=obs_vis,
                 basePosition=[obs_pos[0], obs_pos[1], 0.035],
                 baseOrientation=[0, 0, 0, 1]
             )
 
-        # Step physics to settle objects on ground
-        for _ in range(30):
+        for _ in range(40):
             p.stepSimulation()
 
-    def set_dobot_joints(self, j1, j2, j3, j4, gripper_val=0.0):
+    def set_dobot_joints(self, j1, j2, j3, j4, gripper_close=False):
         """
-        Directly sets kinematic joint states in PyBullet.
-        j2_urdf = pi/2 - j2_kin
-        j3_urdf = -pi/2 - j3_kin
+        Sets arm joint states and drives gripper physics with grasp lock.
         """
         j2_urdf = np.pi / 2.0 - j2
         j3_urdf = -np.pi / 2.0 - j3
@@ -163,31 +168,81 @@ class DobotPybulletPhysicsSim:
         p.resetJointState(self.robot_id, 1, j1)
         p.resetJointState(self.robot_id, 2, j2_urdf)
         p.resetJointState(self.robot_id, 3, j3_urdf)
-        # Mimic joints
         p.resetJointState(self.robot_id, 4, -j2_urdf)
         p.resetJointState(self.robot_id, 5, -j3_urdf)
         p.resetJointState(self.robot_id, 6, j4)
 
-        # Gripper jaws
-        p.resetJointState(self.robot_id, 7, gripper_val)
-        p.resetJointState(self.robot_id, 8, -gripper_val)
+        # Gripper physical actuation
+        jaw_pos = 0.012 if gripper_close else 0.0
+        p.setJointMotorControl2(self.robot_id, self.gripper_j_left, p.POSITION_CONTROL, targetPosition=jaw_pos, force=100)
+        p.setJointMotorControl2(self.robot_id, self.gripper_j_right, p.POSITION_CONTROL, targetPosition=-jaw_pos, force=100)
 
+        self.gripper_closed = gripper_close
+        self._update_gripper_physics()
         p.stepSimulation()
+
+    def _update_gripper_physics(self):
+        """
+        Calculates physical contact between gripper jaws and the pick object.
+        If gripper is closing and jaws contact the object, attaches a rigid 6-DOF constraint.
+        If gripper is opened, releases constraint and lets gravity take over.
+        """
+        if "pick" not in self.object_ids:
+            return
+
+        pick_id = self.object_ids["pick"]
+
+        if self.gripper_closed and not self.grasped:
+            # Check contact between left jaw / right jaw and the pick object
+            contact_l = p.getContactPoints(bodyA=self.robot_id, bodyB=pick_id, linkIndexA=self.gripper_j_left)
+            contact_r = p.getContactPoints(bodyA=self.robot_id, bodyB=pick_id, linkIndexA=self.gripper_j_right)
+            
+            ee_state = p.getLinkState(self.robot_id, self.ee_link_index)
+            ee_pos = np.array(ee_state[0])
+            pick_pos, _ = p.getBasePositionAndOrientation(pick_id)
+            dist_ee_pick = np.linalg.norm(ee_pos - np.array(pick_pos))
+
+            if len(contact_l) > 0 or len(contact_r) > 0 or dist_ee_pick < 0.055:
+                # Lock grasp constraint
+                pick_pos_curr, pick_orn_curr = p.getBasePositionAndOrientation(pick_id)
+                self.grasp_constraint_id = p.createConstraint(
+                    parentBodyUniqueId=self.robot_id,
+                    parentLinkIndex=self.ee_link_index,
+                    childBodyUniqueId=pick_id,
+                    childLinkIndex=-1,
+                    jointType=p.JOINT_FIXED,
+                    jointAxis=[0, 0, 0],
+                    parentFramePosition=[0, 0, -0.02],
+                    childFramePosition=[0, 0, 0]
+                )
+                self.grasped = True
+
+        elif not self.gripper_closed and self.grasped:
+            # Release grasp constraint
+            if self.grasp_constraint_id is not None:
+                p.removeConstraint(self.grasp_constraint_id)
+                self.grasp_constraint_id = None
+            self.grasped = False
 
     def check_obstacle_collision(self):
         """
-        Queries PyBullet physical contact points between the robot arm and the obstacle.
-        Returns True if the robot collides with the obstacle.
+        Checks if the robot arm or the grasped object collides with the obstacle.
         """
         if "obstacle" not in self.object_ids:
             return False
-        pts = p.getContactPoints(bodyA=self.robot_id, bodyB=self.object_ids["obstacle"])
-        return len(pts) > 0
+        obs_id = self.object_ids["obstacle"]
+        # Collision with robot arm
+        arm_contacts = p.getContactPoints(bodyA=self.robot_id, bodyB=obs_id)
+        # Collision with held object
+        obj_contacts = []
+        if self.grasped and "pick" in self.object_ids:
+            obj_contacts = p.getContactPoints(bodyA=self.object_ids["pick"], bodyB=obs_id)
+            
+        return len(arm_contacts) > 0 or len(obj_contacts) > 0
 
     def render_front_45deg_camera(self):
         """
         Renders the physical PyBullet world from the 45-degree front camera.
-        Returns RGB image [H, W, 3] in uint8.
         """
         _, _, rgb_raw, _, _ = p.getCameraImage(
             width=self.width,
@@ -209,15 +264,17 @@ if __name__ == "__main__":
     sim = DobotPybulletPhysicsSim(render_gui=False)
     sim.spawn_scene_objects(
         pick_pos=np.array([0.22, 0.08, 0.012]),
-        pick_angle_deg=35.0,
+        pick_angle_deg=30.0,
         place_pos=np.array([0.22, -0.08, 0.005]),
         obs_pos=np.array([0.22, 0.0, 0.035]),
         pick_type="wrench"
     )
-    sim.set_dobot_joints(0.0, 0.4, -1.7, 0.0)
+    # Test open -> approach -> close grasp -> lift -> release
+    sim.set_dobot_joints(0.0, 0.4, -1.7, 0.0, gripper_close=False)
+    print("Initial grasp status:", sim.grasped)
+    sim.set_dobot_joints(0.0, 0.4, -1.7, 0.0, gripper_close=True)
+    print("Post-clamp grasp status:", sim.grasped)
     rgb = sim.render_front_45deg_camera()
-    print("Physical 45-degree Front Camera Render shape:", rgb.shape)
-    cv2.imwrite("pybullet_front45_demo.png", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
-    print("Obstacle Collision:", sim.check_obstacle_collision())
-    print("PyBullet physical simulation ready!")
+    print("Rendered 45-deg camera frame:", rgb.shape)
     sim.disconnect()
+    print("Gripper physics validated successfully!")

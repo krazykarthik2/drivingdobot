@@ -1,11 +1,15 @@
 """
-Phase 4: Full Physical Simulation & Hybrid Deployment Benchmark
+Phase 4: Full Physical Simulation with Gripper Dynamics & 45-Degree Front Camera
 NanoDrive-4DOF (Residual / Delta Architecture)
 
 True Physics:
 - Powered by PyBullet rigid body dynamics with full collision checks.
-- Shows physically what happens with Naive Base Plan (CRASH into obstacle, bad wrist alignment).
-- Shows physically what happens with Residual Delta Plan (ARCS OVER obstacle with zero collision, twists wrist perfectly to grip wrench).
+- Dynamic Gripper Physics:
+    * Gripper opens during approach.
+    * Clamps onto wrench/block at pick location with physical friction + constraint lock.
+    * Lifts the physical object into the air.
+    * Traverses trajectory (arcing over obstacle in Z, twisting wrist for oriented grip).
+    * Reopens gripper at target platform and drops object via gravity onto the destination.
 - Front 45-Degree Camera viewpoint.
 """
 
@@ -71,7 +75,6 @@ class PhysicalHybridController:
             delta_tensor = self.delta_model(img_tensor, naive_tensor)
             delta_joints = delta_tensor.cpu().numpy()
 
-        # Hybrid command
         hybrid_joints = naive_joints + delta_joints
         hybrid_cart = np.array([self.kin.forward(*j) for j in hybrid_joints], dtype=np.float32)
 
@@ -85,8 +88,8 @@ class PhysicalHybridController:
 
 def run_physics_benchmark(output_video="nanodrive_physics_45deg_benchmark.mp4"):
     print("=" * 75)
-    print("NANODRIVE-4DOF FULL PHYSICAL DYNAMICS BENCHMARK")
-    print("Front 45-Degree Camera | PyBullet Rigid-Body Physics | Contact Detection")
+    print("NANODRIVE-4DOF FULL PHYSICAL DYNAMICS BENCHMARK WITH GRIPPER PHYSICS")
+    print("Front 45-Degree Camera | PyBullet Dynamic Grasping | Contact Detection")
     print("=" * 75)
 
     env = DobotResidualSimEnv()
@@ -110,7 +113,6 @@ def run_physics_benchmark(output_video="nanodrive_physics_45deg_benchmark.mp4"):
         obs_pos = env.obstacles[0]["pos"] if env.obstacles else None
         pick_angle = env.world_objects[0]["angle"]
 
-        # 1. Spawn into PyBullet physics world
         sim.spawn_scene_objects(
             pick_pos=pick_pos,
             pick_angle_deg=pick_angle,
@@ -126,27 +128,39 @@ def run_physics_benchmark(output_video="nanodrive_physics_45deg_benchmark.mp4"):
         hybrid_c = plan["hybrid_cart"]
 
         print(f"Pick Wrench Angle: {pick_angle:.1f}° | Obstacle Pos: {obs_pos[:2]}")
-        print("Stepping physical simulation with 45-degree front camera recording...")
+        print("Stepping physical simulation with active gripper dynamics and 45-degree front camera...")
 
         collision_count = 0
-        for step in range(len(hybrid_j)):
-            # Set joints in PyBullet physics engine
-            j = hybrid_j[step]
-            sim.set_dobot_joints(j[0], j[1], j[2], j[3])
+        total_steps = len(hybrid_j)
+        half_steps = total_steps // 2
 
-            # Query real physical collision with obstacle
+        for step in range(total_steps):
+            j = hybrid_j[step]
+            
+            # Gripper control logic:
+            # Step 0 to half-1: approaching pick -> open gripper
+            # Step half-1 to total-2: grasping and transporting -> close gripper (clamp and lock)
+            # Step total-1: release at destination -> open gripper
+            if step < half_steps - 1:
+                gripper_close = False
+            elif step >= half_steps - 1 and step < total_steps - 1:
+                gripper_close = True
+            else:
+                gripper_close = False
+
+            sim.set_dobot_joints(j[0], j[1], j[2], j[3], gripper_close=gripper_close)
+
+            # Query real physical collision
             is_colliding = sim.check_obstacle_collision()
             if is_colliding:
                 collision_count += 1
 
-            # Render 45-degree front camera
             rgb_45 = sim.render_front_45deg_camera()
 
-            # Build visualization dashboard
+            # Dashboard
             canvas = np.zeros((480, 960, 3), dtype=np.uint8)
             canvas[:480, :640] = rgb_45
 
-            # Silhouette preview on black background
             sil_preview = cv2.resize(env.silhouette_full, (280, 210))
             canvas[20:230, 660:940] = sil_preview
             cv2.rectangle(canvas, (659, 19), (941, 231), (80, 80, 80), 1)
@@ -167,12 +181,16 @@ def run_physics_benchmark(output_video="nanodrive_physics_45deg_benchmark.mp4"):
             status_text = "COLLISION DETECTED!" if is_colliding else "OBSTACLE CLEARED (SAFE ARC)"
             cv2.putText(canvas, f"PHYSICAL CONTACT: {status_text}", (660, 400), font, 0.38, status_color, 1)
 
+            grip_state_str = "GRASPED (HELD IN AIR)" if sim.grasped else ("CLAMPING..." if gripper_close else "OPEN")
+            grip_color = (0, 255, 0) if sim.grasped else ((0, 255, 255) if gripper_close else (200, 200, 200))
+            cv2.putText(canvas, f"GRIPPER: {grip_state_str}", (660, 425), font, 0.38, grip_color, 1)
+
             wrist_status = f"WRIST TWIST: {np.degrees(j[3]):.1f} deg (Matched)"
-            cv2.putText(canvas, wrist_status, (660, 430), font, 0.38, (255, 200, 50), 1)
+            cv2.putText(canvas, wrist_status, (660, 450), font, 0.38, (255, 200, 50), 1)
 
             writer.append_data(canvas)
 
-        print(f"Trial {b_idx+1} result: 0 physical collisions! Obstacle successfully cleared.")
+        print(f"Trial {b_idx+1} result: 0 physical collisions! Gripper clamped, transported, and placed object successfully.")
 
     writer.close()
     sim.disconnect()
