@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+octo/
+octo_small_checkpoint/
+.cache/
+test_*.png
+frame_*.png
+aruco_debug_view.png
+aruco_calibrated_crop.png
+*.pkl
