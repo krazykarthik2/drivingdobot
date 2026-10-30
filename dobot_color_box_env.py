@@ -3,7 +3,8 @@ Dobot Magician Multi-Color Box Pick-and-Place Benchmark Environment.
 Replaces Franka with the 4-DOF Dobot Magician robot and evaluates sorting
 small colored blocks (Red, Green, Blue, Yellow) into corresponding colored receptacles/plates.
 Produces complete HD execution videos with closed-loop servo precision,
-accounting for the 80mm tall end-effector gripper offset and proper gripper state signaling.
+accounting for the 90mm tall end-effector gripper offset and proper gripper state signaling.
+Includes point cloud extraction for 3D Diffusion Policy (DP3).
 """
 import os
 import sys
@@ -28,7 +29,7 @@ COLORS = {
     "plate_yellow": [0.90, 0.85, 0.20, 0.85],
 }
 
-# Gripper Height Offset: 90 mm from tool flange / ee_link to fingertip grasp center (80mm + 10mm more)
+# Gripper Height Offset: 90 mm from tool flange / ee_link to fingertip grasp center
 GRIPPER_HEIGHT_OFFSET = 0.090  # 90mm
 
 class DobotColorBoxEnv:
@@ -149,7 +150,7 @@ class DobotColorBoxEnv:
     def set_cartesian_target(self, x, y, z_tip, r=0.0, gripper_close=False):
         """
         Sets end-effector fingertip Cartesian target (x, y, z_tip).
-        Accounts for the 80mm gripper height offset automatically by solving IK
+        Accounts for the 90mm gripper height offset automatically by solving IK
         for tool flange z_ee = z_tip + GRIPPER_HEIGHT_OFFSET.
         """
         z_ee = z_tip + GRIPPER_HEIGHT_OFFSET
@@ -168,9 +169,6 @@ class DobotColorBoxEnv:
         p.resetJointState(self.robot_id, 5, -j3_urdf)
         p.resetJointState(self.robot_id, 6, j4)
 
-        # Gripper actuation:
-        # gripper_close=True: jaws close firmly inward to 0.0 -> GRIPPED
-        # gripper_close=False: jaws open outward to 0.0135 -> OPEN
         jaw_pos = 0.0 if gripper_close else 0.0135
         p.resetJointState(self.robot_id, self.gripper_j_left, jaw_pos)
         p.resetJointState(self.robot_id, self.gripper_j_right, -jaw_pos)
@@ -186,7 +184,6 @@ class DobotColorBoxEnv:
         Output state: 'GRIPPED' when closed around object, 'OPEN' when retracted open.
         """
         jaw_left = p.getJointState(self.robot_id, self.gripper_j_left)[0]
-        # When jaws are closed (near 0.0), it is GRIPPED. When open (>0.005), it is OPEN.
         is_gripped = (jaw_left < 0.005) and self.gripper_closed
         return {
             "state_str": "GRIPPED" if is_gripped else "OPEN",
@@ -197,7 +194,6 @@ class DobotColorBoxEnv:
 
     def _update_gripper_physics(self):
         ee_pos = p.getLinkState(self.robot_id, self.ee_link_index)[0]
-        # Fingertip position accounting for 80mm gripper
         tip_pos = [ee_pos[0], ee_pos[1], ee_pos[2] - GRIPPER_HEIGHT_OFFSET]
 
         if self.gripper_closed and self.grasped_id is None:
@@ -209,7 +205,6 @@ class DobotColorBoxEnv:
                     break
 
         if self.gripper_closed and self.grasped_id is not None:
-            # Carry box synchronously between fingertips
             p.resetBasePositionAndOrientation(
                 self.grasped_id,
                 [tip_pos[0], tip_pos[1], tip_pos[2] + 0.005],
@@ -217,6 +212,51 @@ class DobotColorBoxEnv:
             )
         elif not self.gripper_closed and self.grasped_id is not None:
             self.grasped_id = None
+
+    def get_robot_state_9d(self):
+        """
+        Returns 9-dim proprioceptive state matching DP3 agent_pos:
+        [ee_pos (3), finger_right (3), finger_left (3)]
+        """
+        ee_pos = p.getLinkState(self.robot_id, self.ee_link_index)[0]
+        tip_pos = [ee_pos[0], ee_pos[1], ee_pos[2] - GRIPPER_HEIGHT_OFFSET]
+        f_left = p.getLinkState(self.robot_id, self.gripper_j_left)[0]
+        f_right = p.getLinkState(self.robot_id, self.gripper_j_right)[0]
+        return np.concatenate([tip_pos, f_right, f_left]).astype(np.float32)
+
+    def get_point_cloud(self, num_points=512):
+        """
+        Extracts 3D Point Cloud (Nx3) from the camera depth buffer without knowing box ground-truth positions.
+        """
+        w, h = 128, 128
+        _, _, rgb, depth, _ = p.getCameraImage(
+            w, h, self.view_matrix, self.proj_matrix, renderer=p.ER_TINY_RENDERER
+        )
+        near, far = 0.05, 2.5
+        z_ndc = 2.0 * depth - 1.0
+        z_eye = 2.0 * near * far / (far + near - z_ndc * (far - near))
+
+        xs = np.linspace(-1, 1, w)
+        ys = np.linspace(1, -1, h)
+        x_grid, y_grid = np.meshgrid(xs, ys)
+        aspect = float(w) / float(h)
+        tan_half_fov = np.tan(np.deg2rad(self.fov / 2.0))
+        x_eye = x_grid * z_eye * tan_half_fov * aspect
+        y_eye = y_grid * z_eye * tan_half_fov
+
+        pts_cam = np.stack([x_eye, y_eye, -z_eye, np.ones_like(z_eye)], axis=-1).reshape(-1, 4)
+        inv_view = np.linalg.inv(np.array(self.view_matrix).reshape(4, 4).T)
+        pts_world = (pts_cam @ inv_view.T)[:, :3]
+
+        # Filter out points below table/plane or too far
+        mask = (pts_world[:, 2] > -0.05) & (pts_world[:, 2] < 0.25) & (pts_world[:, 0] > 0.05) & (pts_world[:, 0] < 0.40)
+        pts_filtered = pts_world[mask]
+
+        if len(pts_filtered) < num_points:
+            pts_filtered = pts_world
+
+        indices = np.random.choice(pts_filtered.shape[0], num_points, replace=(len(pts_filtered) < num_points))
+        return pts_filtered[indices].astype(np.float32)
 
     def render_frame(self):
         _, _, rgb, _, _ = p.getCameraImage(
