@@ -15,6 +15,7 @@ import time
 import numpy as np
 import cv2
 import torch
+import pybullet as p
 
 from dobot_color_box_env import DobotColorBoxEnv, GRIPPER_HEIGHT_OFFSET
 from dobot_vla_agent import DobotVLAAgent
