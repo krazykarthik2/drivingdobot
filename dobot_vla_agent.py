@@ -124,16 +124,17 @@ class DobotVLAAgent:
         # Temperature-scaled initial noise for flow-matching ODE:
         # temperature = 0.0 -> deterministic zero-noise ODE integration (maximum mode coherence)
         # temperature < 1.0 -> reduced variance sampling
-        policy_dtype = next(self.policy.parameters()).dtype
+        # Match exact dtype of action_in_proj (bfloat16) to avoid runtime dtype mismatch in ODE integration
+        proj_dtype = self.policy.model.action_in_proj.weight.dtype
         if temperature <= 1e-4:
             noise = torch.zeros(
                 1, self.policy.config.chunk_size, self.policy.config.max_action_dim,
-                device=self.device, dtype=policy_dtype
+                device=self.device, dtype=proj_dtype
             )
         else:
             noise = torch.randn(
                 1, self.policy.config.chunk_size, self.policy.config.max_action_dim,
-                device=self.device, dtype=policy_dtype
+                device=self.device, dtype=proj_dtype
             ) * temperature
 
         # Predict physical action step via flow matching
