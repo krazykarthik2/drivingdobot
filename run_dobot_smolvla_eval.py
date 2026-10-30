@@ -164,7 +164,7 @@ def run_vla_benchmark():
             wrist_frame = env.render_wrist_frame(256, 256)
             side_frame = env.render_side_frame(256, 256)
             
-            so100_state = get_so100_state(current_ee, gripper_closed=True)
+            so100_state = get_so100_state(current_ee, is_grip_closed=True)
             action_norm, action_unnorm = agent.select_action(frame, so100_state, wrist_image=wrist_frame, side_image=side_frame, temperature=0.0)
             
             pan_deg = float(action_unnorm[0] * 2.45)
