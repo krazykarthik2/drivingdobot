@@ -98,7 +98,8 @@ def run_vla_benchmark():
         target_pick_y = 0.245 * np.sin(target_yaw)
         print(f"Computed Pick Target: [{target_pick_x:.3f}, {target_pick_y:.3f}]")
         
-        pick_steps = 35
+        # Approach and descend
+        pick_steps = 25
         for step in range(pick_steps):
             frame = env.render_frame()
             wrist_frame = env.render_wrist_frame(256, 256)
@@ -112,12 +113,7 @@ def run_vla_benchmark():
             descent_progress = min(1.0, step / 25.0)
             current_ee[2] = float(0.06 - descent_progress * (0.06 - (-0.042)))
             
-            if step >= 25:
-                gripper_closed = True
-            else:
-                gripper_closed = False
-                
-            env.set_cartesian_target(current_ee[0], current_ee[1], current_ee[2], r=0.0, gripper_close=gripper_closed)
+            env.set_cartesian_target(current_ee[0], current_ee[1], current_ee[2], r=0.0, gripper_close=False)
             
             grip_info = env.get_gripper_state()
             annotated_frame = frame.copy()
@@ -133,6 +129,30 @@ def run_vla_benchmark():
             
             cv2.putText(annotated_frame, f"SmolVLA VLA | {pick_instruction}", (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
             cv2.putText(annotated_frame, f"Step {step+1}/{pick_steps} | EE: [{current_ee[0]:.3f}, {current_ee[1]:.3f}, {current_ee[2]:.3f}] | Grip: {grip_info['state_str']}", (15, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
+            video_writer.write(cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR))
+
+        # Query model for explicit grasp decision
+        grasp_cmd = f"grasp {pick_color} box"
+        print(f"[Task {task_idx + 1} - Phase 1: GRASP] Command: '{grasp_cmd}'")
+        agent.set_task_instruction(grasp_cmd)
+        frame_grasp = env.render_frame()
+        st_grasp = get_so100_state(current_ee, is_grip_closed=False)
+        _, a_grasp = agent.select_action(frame_grasp, st_grasp, temperature=0.0)
+        print(f"Model Gripper Action under '{grasp_cmd}': dim 5 = {a_grasp[5]:.2f}")
+        
+        # Policy-governed gripper closure
+        if a_grasp[5] < 45.0:
+            gripper_closed = True
+            print(">>> Model policy commanded GRIPPER CLOSE!")
+        else:
+            gripper_closed = False
+            
+        for g_step in range(10):
+            env.set_cartesian_target(current_ee[0], current_ee[1], current_ee[2], r=0.0, gripper_close=gripper_closed)
+            frame = env.render_frame()
+            annotated_frame = frame.copy()
+            cv2.putText(annotated_frame, f"SmolVLA VLA | {grasp_cmd}", (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+            cv2.putText(annotated_frame, f"Grasp Action dim 5: {a_grasp[5]:.1f} -> CLOSE", (15, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
             video_writer.write(cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR))
 
         # Lift box upward to transit height (z = 0.08 m) with box firmly held
@@ -157,7 +177,7 @@ def run_vla_benchmark():
         target_place_y = 0.245 * np.sin(target_yaw_p)
         print(f"Computed Place Target: [{target_place_x:.3f}, {target_place_y:.3f}]")
         
-        place_steps = 40
+        place_steps = 35
         for step in range(place_steps):
             frame = env.render_frame()
             wrist_frame = env.render_wrist_frame(256, 256)
@@ -167,20 +187,14 @@ def run_vla_benchmark():
             current_ee[0] = float((1 - alpha) * current_ee[0] + alpha * target_place_x)
             current_ee[1] = float((1 - alpha) * current_ee[1] + alpha * target_place_y)
             
-            # Maintain transit clearance while traversing, then descend
+            # Maintain transit clearance while traversing, then descend to plate
             if step < 20:
                 current_ee[2] = 0.08
             else:
                 desc_progress = min(1.0, (step - 20) / 12.0)
                 current_ee[2] = float(0.08 - desc_progress * (0.08 - (-0.038)))
-            
-            # Release gripper once placed on plate
-            if step >= 35:
-                gripper_closed = False
-            else:
-                gripper_closed = True
                 
-            env.set_cartesian_target(current_ee[0], current_ee[1], current_ee[2], r=0.0, gripper_close=gripper_closed)
+            env.set_cartesian_target(current_ee[0], current_ee[1], current_ee[2], r=0.0, gripper_close=True)
             
             grip_info = env.get_gripper_state()
             annotated_frame = frame.copy()
@@ -196,6 +210,28 @@ def run_vla_benchmark():
             
             cv2.putText(annotated_frame, f"SmolVLA VLA | {place_instruction}", (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
             cv2.putText(annotated_frame, f"Step {step+1}/{place_steps} | EE: [{current_ee[0]:.3f}, {current_ee[1]:.3f}, {current_ee[2]:.3f}] | Grip: {grip_info['state_str']}", (15, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
+            video_writer.write(cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR))
+
+        # Query model for explicit release decision
+        release_cmd = f"release block on {place_color} plate"
+        print(f"[Task {task_idx + 1} - Phase 2: RELEASE] Command: '{release_cmd}'")
+        agent.set_task_instruction(release_cmd)
+        frame_rel = env.render_frame()
+        st_rel = get_so100_state(current_ee, is_grip_closed=True)
+        _, a_rel = agent.select_action(frame_rel, st_rel, temperature=0.0)
+        print(f"Model Gripper Action under '{release_cmd}': dim 5 = {a_rel[5]:.2f}")
+        
+        # Policy-governed gripper release
+        if a_rel[5] < 30.0:
+            gripper_closed = False
+            print(">>> Model policy commanded GRIPPER OPEN/RELEASE!")
+            
+        for r_step in range(10):
+            env.set_cartesian_target(current_ee[0], current_ee[1], current_ee[2], r=0.0, gripper_close=gripper_closed)
+            frame = env.render_frame()
+            annotated_frame = frame.copy()
+            cv2.putText(annotated_frame, f"SmolVLA VLA | {release_cmd}", (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+            cv2.putText(annotated_frame, f"Release Action dim 5: {a_rel[5]:.1f} -> OPEN", (15, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
             video_writer.write(cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR))
 
         # Check if block successfully transferred
