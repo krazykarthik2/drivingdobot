@@ -47,6 +47,10 @@ class DobotVLAAgent:
         self.policy.to(self.device)
         self.policy.eval()
 
+        # SO-100 unnormalization statistics from LeRobot smolvla_base checkpoint
+        self.action_mean = np.array([1.5959, 119.9442, 109.7698, 56.7055, -27.4227, 12.0028], dtype=np.float32)
+        self.action_std = np.array([26.3918, 52.4114, 49.8538, 36.9983, 59.3600, 19.0400], dtype=np.float32)
+
         self.instruction = ""
         self.input_ids = None
         self.attention_mask = None
@@ -119,8 +123,11 @@ class DobotVLAAgent:
         # Predict physical action step via flow matching
         action_tensor = self.policy.select_action(batch)
         if isinstance(action_tensor, torch.Tensor):
-            action = action_tensor.detach().cpu().numpy().squeeze()
+            action_norm = action_tensor.detach().cpu().numpy().squeeze()
         else:
-            action = np.array(action_tensor).squeeze()
+            action_norm = np.array(action_tensor).squeeze()
 
-        return action
+        # Unnormalize model output to physical SO-100 joint space (degrees)
+        action_unnorm = action_norm * self.action_std + self.action_mean
+
+        return action_norm, action_unnorm

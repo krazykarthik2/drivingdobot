@@ -84,21 +84,38 @@ def run_vla_benchmark():
             ], dtype=np.float32)
 
             # Query SmolVLA flow-matching policy with 3 distinct camera feeds
-            action = agent.select_action(frame, state_6d, wrist_image=wrist_frame, side_image=side_frame)
+            action_norm, action_unnorm = agent.select_action(frame, state_6d, wrist_image=wrist_frame, side_image=side_frame)
 
-            # Map predicted delta action to Dobot physical workspace
-            # action: [dx, dy, dz, droll, dpitch, gripper]
-            dx = float(np.clip(action[0] * 0.015, -0.015, 0.015))
-            dy = float(np.clip(action[1] * 0.015, -0.015, 0.015))
-            dz = float(np.clip(action[2] * 0.015, -0.015, 0.015))
-            grip_cmd = float(action[5])
-
-            current_ee[0] = np.clip(current_ee[0] + dx, 0.15, 0.32)
-            current_ee[1] = np.clip(current_ee[1] + dy, -0.16, 0.16)
-            current_ee[2] = np.clip(current_ee[2] + dz, -0.038, 0.12)
-
-            # Threshold for gripper activation from continuous VLA output
-            gripper_closed = (grip_cmd > 0.0)
+            # Map predicted SO-100 action to Dobot physical workspace:
+            # action_unnorm[0]: SO-100 shoulder pan (degrees). Center is 0 deg. Dobot base yaw corresponds directly.
+            # action_unnorm[1]: SO-100 shoulder lift (degrees). Mean ~ 120 deg.
+            # action_unnorm[2]: SO-100 elbow flex (degrees). Mean ~ 110 deg.
+            # action_unnorm[5]: SO-100 gripper opening / closing
+            target_yaw = np.deg2rad(action_unnorm[0])
+            
+            # Radial extension forward (+dx) driven by lift/flex extension, vertical descent (-dz)
+            delta_lift = (action_unnorm[1] - agent.action_mean[1]) / agent.action_std[1]
+            delta_flex = (action_unnorm[2] - agent.action_mean[2]) / agent.action_std[2]
+            
+            # Step in cylindrical/Cartesian coordinates
+            current_r = np.sqrt(current_ee[0]**2 + current_ee[1]**2)
+            dr = float(np.clip(delta_lift * 0.008, -0.012, 0.012))
+            new_r = np.clip(current_r + dr, 0.18, 0.32)
+            
+            # Target yaw drives x-y orientation
+            target_x = new_r * np.cos(target_yaw)
+            target_y = new_r * np.sin(target_yaw)
+            
+            dz = float(np.clip(-delta_flex * 0.008, -0.015, 0.015))
+            target_z = np.clip(current_ee[2] + dz, -0.038, 0.12)
+            
+            current_ee[0] = float(target_x)
+            current_ee[1] = float(target_y)
+            current_ee[2] = float(target_z)
+            
+            # Continuous gripper threshold (action_unnorm[5] < 10 degrees indicates closed gripper)
+            grip_cmd = float(action_norm[5])
+            gripper_closed = (grip_cmd > 0.0 or action_unnorm[5] < 5.0)
 
             # Apply physical joint servoing via IK accounting for 90mm offset
             env.set_cartesian_target(
