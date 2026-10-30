@@ -28,10 +28,14 @@ def run_interactive_alignment(cam_id=0):
     print("=" * 70)
     print(f"[INFO] Opening Webcam Device ID: {cam_id}...")
 
-    cap = cv2.VideoCapture(cam_id)
+    cap = cv2.VideoCapture(cam_id, cv2.CAP_DSHOW)
     if not cap.isOpened():
-        print(f"[ERROR] Could not open camera {cam_id}. Trying camera 1...")
-        cap = cv2.VideoCapture(1)
+        cap = cv2.VideoCapture(cam_id)
+    if not cap.isOpened():
+        print(f"[ERROR] Could not open camera {cam_id}. Trying camera 0...")
+        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(0)
         if not cap.isOpened():
             print("[ERROR] No camera available!")
             return

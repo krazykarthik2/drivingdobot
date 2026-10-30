@@ -28,9 +28,15 @@ class InteractiveDobotControl:
         print("=" * 70)
 
         self.cam_id = cam_id
-        self.cap = cv2.VideoCapture(cam_id)
+        # Open camera with DirectShow backend for faster, reliable startup on Windows
+        self.cap = cv2.VideoCapture(cam_id, cv2.CAP_DSHOW)
         if not self.cap.isOpened():
-            self.cap = cv2.VideoCapture(1)
+            self.cap = cv2.VideoCapture(cam_id)
+        if not self.cap.isOpened():
+            print(f"[WARN] Camera {cam_id} failed. Falling back to camera 0...")
+            self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            if not self.cap.isOpened():
+                self.cap = cv2.VideoCapture(0)
 
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
@@ -198,5 +204,10 @@ class InteractiveDobotControl:
 
 
 if __name__ == "__main__":
-    app = InteractiveDobotControl(cam_id=0)
+    import argparse
+    parser = argparse.ArgumentParser(description="Interactive Prompt-Driven Dobot Control")
+    parser.add_argument("--cam", type=int, default=0, help="Webcam device index (0, 1, ...)")
+    args = parser.parse_args()
+
+    app = InteractiveDobotControl(cam_id=args.cam)
     app.run()
