@@ -7,96 +7,114 @@ Four 8cm x 8cm (80mm x 80mm) markers placed seamlessly side-by-side with NO GAPS
     Top Row:    [ ID 0 ] [ ID 1 ]
     Bottom Row: [ ID 2 ] [ ID 3 ]
 
-Total Grid Footprint: 160 mm wide x 160 mm deep.
-Center-to-Center Pitch between adjacent markers = exactly 80.0 mm.
+Provides two rectification modes:
+1. "sim_projection" (DEFAULT): Warps the real webcam feed into the EXACT 3D camera projection
+   of the PyBullet simulation environment (45° elevated front view). This ensures that physical
+   markers, tables, and objects align with 0.5 opacity directly onto the virtual 3D Dobot twin.
+2. "orthographic": Warps into a top-down flattened grid view.
 """
 
 import cv2
 import numpy as np
+import pybullet as p
 
 
 class ArucoAutoCalibrator:
     def __init__(
         self,
-        output_size=(256, 256),
+        output_size=(640, 480),
         dict_type=cv2.aruco.DICT_4X4_50,
-        grid_base_x_mm=140.0,
-        grid_center_y_mm=0.0,
+        mode="sim_projection",
         marker_size_mm=80.0
     ):
         """
-        Marker Grid Geometry:
-        Four 80mm x 80mm markers touching edge-to-edge with NO gaps:
-            [ ID 0 ] (Top-Left)     |  [ ID 1 ] (Top-Right)
-            ------------------------+------------------------
-            [ ID 2 ] (Bottom-Left)  |  [ ID 3 ] (Bottom-Right)
-
-        From the front camera perspective facing the Dobot base:
-        - Top row (closer to Dobot base): X = grid_base_x_mm + 80 + 40 = 260 mm (or custom)
-          ID 0 (Top-Left):  X = 260.0 mm, Y = -40.0 mm
-          ID 1 (Top-Right): X = 260.0 mm, Y = +40.0 mm
-        - Bottom row (closer to camera):
-          ID 2 (Bottom-Left):  X = 180.0 mm, Y = -40.0 mm
-          ID 3 (Bottom-Right): X = 180.0 mm, Y = +40.0 mm
+        mode="sim_projection":
+            Computes homography directly into the PyBullet simulation's camera projection coordinates.
+            PyBullet Camera Setup:
+                Eye: [0.42, 0.0, 0.32], Target: [0.20, 0.0, -0.04], Up: [0.0, 0.0, 1.0], FOV: 45.0
+            Physical Table Surface: Z = -0.050 m
         """
         self.output_size = output_size  # (width, height)
         self.dict_type = dict_type
         self.dictionary = cv2.aruco.getPredefinedDictionary(dict_type)
         self.parameters = cv2.aruco.DetectorParameters()
         self.detector = cv2.aruco.ArucoDetector(self.dictionary, self.parameters)
+        self.mode = mode
         self.marker_size_mm = marker_size_mm
 
-        # Physical Workspace Definition (in Dobot Millimeters)
-        # Covers reach envelope: X in [100, 340], Y in [-150, 150]
-        self.x_min_mm = 100.0
-        self.x_max_mm = 340.0
-        self.y_min_mm = -150.0
-        self.y_max_mm = 150.0
+        w, h = self.output_size
 
-        # Exact physical center coordinates for 80mm touching markers (NO GAPS):
-        # Center of ID 0 to ID 1 distance = 80mm
-        # Center of ID 2 to ID 3 distance = 80mm
-        # Center of ID 0 to ID 2 distance = 80mm
-        # Center of ID 1 to ID 3 distance = 80mm
-        self.marker_phys_coords = {
-            0: (260.0, -40.0),  # Top-Left (Near Base, Robot Right)
-            1: (260.0, +40.0),  # Top-Right (Near Base, Robot Left)
-            2: (180.0, -40.0),  # Bottom-Left (Front, Robot Right)
-            3: (180.0, +40.0),  # Bottom-Right (Front, Robot Left)
+        # Physical marker center coordinates in meters in Dobot / PyBullet coordinates:
+        # 80mm x 80mm markers touching with no gaps:
+        # ID 0 (Top-Left):  X = 0.260 m, Y = -0.040 m, Z = -0.050 m (tabletop)
+        # ID 1 (Top-Right): X = 0.260 m, Y = +0.040 m, Z = -0.050 m
+        # ID 2 (Bottom-Left):  X = 0.180 m, Y = -0.040 m, Z = -0.050 m
+        # ID 3 (Bottom-Right): X = 0.180 m, Y = +0.040 m, Z = -0.050 m
+        self.table_z = -0.050  # tabletop height in PyBullet
+        self.marker_world_pts = {
+            0: [0.260, -0.040, self.table_z],
+            1: [0.260,  0.040, self.table_z],
+            2: [0.180, -0.040, self.table_z],
+            3: [0.180,  0.040, self.table_z],
         }
 
-        # Precompute target pixel coordinates in rectified frame
-        self.dst_center_pts = np.array([
-            self.dobot_to_pixel(*self.marker_phys_coords[0]),
-            self.dobot_to_pixel(*self.marker_phys_coords[1]),
-            self.dobot_to_pixel(*self.marker_phys_coords[2]),
-            self.dobot_to_pixel(*self.marker_phys_coords[3]),
-        ], dtype=np.float32)
+        if mode == "sim_projection":
+            # Compute the exact 3D camera projection matrix from PyBullet
+            cam_eye = [0.42, 0.0, 0.32]
+            cam_target = [0.20, 0.0, -0.04]
+            cam_up = [0.0, 0.0, 1.0]
+            fov = 45.0
+
+            view_matrix = p.computeViewMatrix(cam_eye, cam_target, cam_up)
+            proj_matrix = p.computeProjectionMatrixFOV(fov, 1.0, 0.05, 2.5)
+
+            V = np.array(view_matrix).reshape((4, 4), order='F')
+            P = np.array(proj_matrix).reshape((4, 4), order='F')
+            self.VP = P @ V
+
+            # Project the 4 marker centers into the exact simulation camera pixel coordinates
+            self.dst_center_pts = np.array([
+                self.project_world_to_sim_pixel(self.marker_world_pts[0]),
+                self.project_world_to_sim_pixel(self.marker_world_pts[1]),
+                self.project_world_to_sim_pixel(self.marker_world_pts[2]),
+                self.project_world_to_sim_pixel(self.marker_world_pts[3]),
+            ], dtype=np.float32)
+
+        else:
+            # Orthographic top-down flattened grid
+            self.x_min_mm, self.x_max_mm = 100.0, 340.0
+            self.y_min_mm, self.y_max_mm = -150.0, 150.0
+            self.dst_center_pts = np.array([
+                self._ortho_to_pixel(260.0, -40.0),
+                self._ortho_to_pixel(260.0,  40.0),
+                self._ortho_to_pixel(180.0, -40.0),
+                self._ortho_to_pixel(180.0,  40.0),
+            ], dtype=np.float32)
 
         self.homography_matrix = None
         self.inv_homography_matrix = None
         self.is_calibrated = False
+
+    def project_world_to_sim_pixel(self, pt_3d):
+        """Projects a 3D world coordinate [x, y, z] into PyBullet simulation camera pixel (u, v)."""
+        w, h = self.output_size
+        clip = self.VP @ np.array([pt_3d[0], pt_3d[1], pt_3d[2], 1.0])
+        ndc = clip[:3] / clip[3]
+        u = ((ndc[0] + 1.0) / 2.0) * (w - 1.0)
+        v = ((1.0 - ndc[1]) / 2.0) * (h - 1.0)
+        return [float(u), float(v)]
+
+    def _ortho_to_pixel(self, x_mm, y_mm):
+        w, h = self.output_size
+        u = ((y_mm - self.y_min_mm) / (self.y_max_mm - self.y_min_mm)) * (w - 1.0)
+        v = ((self.x_max_mm - x_mm) / (self.x_max_mm - self.x_min_mm)) * (h - 1.0)
+        return [float(u), float(v)]
 
     def reset_calibration(self):
         """Resets the computed homography matrix and forces recalibration."""
         self.homography_matrix = None
         self.inv_homography_matrix = None
         self.is_calibrated = False
-
-    def dobot_to_pixel(self, x_mm: float, y_mm: float) -> list:
-        """Maps Dobot physical coordinates (mm) to rectified output pixel (u, v)."""
-        w, h = self.output_size
-        u = ((y_mm - self.y_min_mm) / (self.y_max_mm - self.y_min_mm)) * (w - 1.0)
-        # X increases going towards base (screen top)
-        v = ((self.x_max_mm - x_mm) / (self.x_max_mm - self.x_min_mm)) * (h - 1.0)
-        return [float(u), float(v)]
-
-    def pixel_to_dobot(self, u: float, v: float) -> tuple:
-        """Maps rectified output pixel (u, v) back to Dobot physical coordinates (x_mm, y_mm)."""
-        w, h = self.output_size
-        y_mm = self.y_min_mm + (u / (w - 1.0)) * (self.y_max_mm - self.y_min_mm)
-        x_mm = self.x_max_mm - (v / (h - 1.0)) * (self.x_max_mm - self.x_min_mm)
-        return float(x_mm), float(y_mm)
 
     def detect_markers(self, frame: np.ndarray):
         """Detects ArUco markers and returns corner centers and boundaries."""
@@ -116,8 +134,7 @@ class ArucoAutoCalibrator:
 
     def calibrate(self, frame: np.ndarray) -> tuple:
         """
-        Computes the 3x3 homography matrix H using the exact 80x80mm seamless grid layout.
-        Returns: (success: bool, status_message: str)
+        Computes 3x3 homography matrix H to match the simulation's 3D perspective camera projection.
         """
         centers, _, _, _ = self.detect_markers(frame)
         required_ids = [0, 1, 2, 3]
@@ -126,7 +143,6 @@ class ArucoAutoCalibrator:
         if missing:
             return False, f"Missing ArUco markers: IDs {missing}. Detected: {list(centers.keys())}"
 
-        # Match detected points in exact order: ID 0, ID 1, ID 2, ID 3
         src_pts = np.array([centers[mid] for mid in required_ids], dtype=np.float32)
         H, _ = cv2.findHomography(src_pts, self.dst_center_pts)
 
@@ -140,10 +156,7 @@ class ArucoAutoCalibrator:
 
     def process_frame(self, frame: np.ndarray, auto_calibrate: bool = True) -> tuple:
         """
-        Warps input frame to canonical rectified VLA observation.
-        Returns:
-            rectified_rgb: (H, W, 3) undistorted, canonical workspace image.
-            debug_view: Original image annotated with detection markers & rectified bounds.
+        Warps input frame to canonical rectified VLA observation matching simulation view.
         """
         debug_view = frame.copy()
         centers, _, corners, ids = self.detect_markers(frame)
@@ -168,32 +181,8 @@ class ArucoAutoCalibrator:
 
         w, h = self.output_size
         if self.is_calibrated:
-            # Warp webcam frame to canonical coordinate plane
             rectified = cv2.warpPerspective(frame, self.homography_matrix, (w, h))
-
-            # Project canonical bounding box back onto camera debug view
-            rect_corners = np.array([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]], dtype=np.float32)
-            poly_pts = cv2.perspectiveTransform(rect_corners[None, :, :], self.inv_homography_matrix)[0].astype(np.int32)
-            cv2.polylines(debug_view, [poly_pts], isClosed=True, color=(0, 255, 0), thickness=2)
-            cv2.putText(
-                debug_view,
-                "CALIBRATED WORKSPACE (8x8cm Seamless Grid)",
-                (poly_pts[0][0], max(poly_pts[0][1] - 10, 25)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.55,
-                (0, 255, 0),
-                2
-            )
             return rectified, debug_view
         else:
             fallback = cv2.resize(frame, (w, h))
-            cv2.putText(
-                debug_view,
-                "WAITING FOR 4 ARUCO (0, 1, 2, 3)...",
-                (25, 40),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.65,
-                (0, 0, 255),
-                2
-            )
             return fallback, debug_view
