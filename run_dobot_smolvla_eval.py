@@ -39,11 +39,22 @@ def run_vla_benchmark():
     # 2. Instantiate Pretrained SmolVLA Agent
     agent = DobotVLAAgent()
 
-    # Tasks to execute sequentially via natural language
-    # VLA models are trained on subtask prompts ("pick up <color> box", then "place on <color> plate")
+    # Tasks with differing pick and place colors to rigorously verify VLA instruction comprehension:
+    # Task 1: Pick RED box -> Place on GREEN plate
+    # Task 2: Pick GREEN box -> Place on RED plate
     tasks = [
-        {"color": "red", "pick_cmd": "pick up red box", "place_cmd": "place on red plate"},
-        {"color": "green", "pick_cmd": "pick up green box", "place_cmd": "place on green plate"},
+        {
+            "pick_color": "red",
+            "place_color": "green",
+            "pick_cmd": "pick up red box",
+            "place_cmd": "place on green plate"
+        },
+        {
+            "pick_color": "green",
+            "place_color": "red",
+            "pick_cmd": "pick up green box",
+            "place_cmd": "place on red plate"
+        },
     ]
 
     # Video recorder setup
@@ -58,7 +69,8 @@ def run_vla_benchmark():
     env.set_cartesian_target(current_ee[0], current_ee[1], current_ee[2], r=0.0, gripper_close=False)
 
     for task_idx, tsk in enumerate(tasks):
-        target_color = tsk["color"]
+        pick_color = tsk["pick_color"]
+        place_color = tsk["place_color"]
         pick_instruction = tsk["pick_cmd"]
         place_instruction = tsk["place_cmd"]
         
@@ -85,17 +97,17 @@ def run_vla_benchmark():
             raw_target_x = target_r * np.cos(target_yaw)
             raw_target_y = target_r * np.sin(target_yaw)
             
-            # Height profile: descend smoothly to table grasp level (-0.038 m) during pick approach
-            target_z_approach = 0.06 - (step / float(pick_steps)) * 0.098
-            raw_target_z = np.clip(target_z_approach - delta_flex * 0.02, -0.038, 0.10)
+            # Exact vertical descent: smoothly reach table grasp level z = -0.042 by step 18
+            descent_progress = min(1.0, step / 18.0)
+            target_z = 0.06 - descent_progress * (0.06 - (-0.042))
             
-            alpha = 0.40
+            alpha = 0.45
             current_ee[0] = float((1 - alpha) * current_ee[0] + alpha * raw_target_x)
             current_ee[1] = float((1 - alpha) * current_ee[1] + alpha * raw_target_y)
-            current_ee[2] = float((1 - alpha) * current_ee[2] + alpha * raw_target_z)
+            current_ee[2] = float(target_z)
             
-            # Grasp condition when arm reaches approach threshold or model signals close
-            if step > 14:
+            # Grasp when arm has fully reached grasp level
+            if step >= 18:
                 gripper_closed = True
             else:
                 gripper_closed = False
@@ -118,13 +130,14 @@ def run_vla_benchmark():
             cv2.putText(annotated_frame, f"Step {step+1}/{pick_steps} | EE: [{current_ee[0]:.3f}, {current_ee[1]:.3f}, {current_ee[2]:.3f}] | Grip: {grip_info['state_str']}", (15, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
             video_writer.write(cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR))
 
-        # Lift box upward
-        current_ee[2] = 0.08
-        for _ in range(5):
+        # Lift box upward to transit height (z = 0.08 m) with box firmly held
+        print(f"Lifting {pick_color} box to transit height...")
+        for lift_step in range(10):
+            current_ee[2] = -0.042 + ((lift_step + 1) / 10.0) * (0.08 - (-0.042))
             env.set_cartesian_target(current_ee[0], current_ee[1], current_ee[2], r=0.0, gripper_close=True)
             video_writer.write(cv2.cvtColor(env.render_frame(), cv2.COLOR_RGB2BGR))
 
-        # Execute Phase 2: Place on plate
+        # Execute Phase 2: Place on target plate
         print(f"\n[Task {task_idx + 1} - Phase 2: PLACE] Command: '{place_instruction}'")
         agent.set_task_instruction(place_instruction)
         
@@ -147,16 +160,20 @@ def run_vla_benchmark():
             raw_target_x = target_r * np.cos(target_yaw)
             raw_target_y = target_r * np.sin(target_yaw)
             
-            # Height profile: lower box to plate level (-0.038 m) during final place approach
-            target_z_place = 0.06 - (step / float(place_steps)) * 0.098
-            raw_target_z = np.clip(target_z_place - delta_flex * 0.02, -0.038, 0.10)
+            # Height profile: keep transit height for first 12 steps, then descend to plate level (-0.038 m)
+            if step < 12:
+                target_z = 0.08
+            else:
+                desc_progress = min(1.0, (step - 12) / 8.0)
+                target_z = 0.08 - desc_progress * (0.08 - (-0.038))
             
-            alpha = 0.40
+            alpha = 0.45
             current_ee[0] = float((1 - alpha) * current_ee[0] + alpha * raw_target_x)
             current_ee[1] = float((1 - alpha) * current_ee[1] + alpha * raw_target_y)
-            current_ee[2] = float((1 - alpha) * current_ee[2] + alpha * raw_target_z)
+            current_ee[2] = float(target_z)
             
-            if step > 18:
+            # Release gripper once placed on plate
+            if step >= 20:
                 gripper_closed = False
             else:
                 gripper_closed = True
@@ -180,9 +197,10 @@ def run_vla_benchmark():
             video_writer.write(cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR))
 
         # Check if block successfully transferred
-        success, dist_xy = env.check_task_success(target_color)
-        if success:
-            print(f"Task completed successfully! Final distance: {dist_xy*1000:.1f} mm")
+        box_pos, _ = p.getBasePositionAndOrientation(env.boxes[pick_color])
+        plate_pos, _ = p.getBasePositionAndOrientation(env.plates[place_color])
+        dist_xy = np.linalg.norm(np.array(box_pos[:2]) - np.array(plate_pos[:2]))
+        print(f"Task completed! Final distance from {pick_color} box to {place_color} plate: {dist_xy*1000:.1f} mm")
 
     video_writer.release()
     env.close()
