@@ -1,9 +1,10 @@
 """
-Dobot 3D DP3 Policy Controller and Closed-Loop Evaluator.
-Directly loads the official 3D Diffusion Policy (DP3) model trained on bin-picking/manipulation
+Dobot 3D DP3 Policy Controller with Canonical Point Cloud Alignment.
+Directly loads the official 3D Diffusion Policy (DP3) model trained on bin-picking
 from `dp3_official/latest_binpicking.ckpt`.
-Feeds real-time 3D Point Clouds (512x3) extracted from the scene depth camera and 9-dim robot state.
-Executes the predicted 4-dim diffusion action trajectory on Dobot with ZERO oracle coordinates and ZERO hand-holding.
+Projects 3D Point Clouds and robot state into the policy's canonical reference frame,
+runs the 255M parameter diffusion policy model step-by-step,
+and maps the predicted actions back to Dobot control without any oracle coordinates or hardcoded waypoints.
 """
 import os
 import sys
@@ -83,17 +84,54 @@ class DobotDP3Controller:
     def reset(self):
         self.obs_history = []
 
-    def predict(self, point_cloud_512x3, agent_pos_9d):
+    def to_canonical_frame(self, pts):
+        """
+        Maps Dobot physical coordinates to the DP3 model's training canonical frame:
+        Dobot forward (x: 0.17->0.27) -> Canonical y (0.60->0.75)
+        Dobot lateral (y: -0.10->0.10) -> Canonical x (-0.15->0.15)
+        Dobot vertical (z: -0.04->0.08) -> Canonical z (0.06->0.20)
+        """
+        p = np.copy(pts)
+        x_c = p[..., 1]
+        y_c = 0.68 + (p[..., 0] - 0.22) * 1.2
+        z_c = 0.11 + (p[..., 2] - 0.02) * 1.0
+        return np.stack([x_c, y_c, z_c], axis=-1).astype(np.float32)
+
+    def actions_to_dobot(self, act_canonical):
+        """
+        Maps canonical action delta [dx_c, dy_c, dz_c, grip] back to Dobot delta [dx, dy, dz, grip]:
+        dx_dobot = dy_c / 1.2
+        dy_dobot = dx_c
+        dz_dobot = dz_c
+        """
+        dx_c = act_canonical[:, 0]
+        dy_c = act_canonical[:, 1]
+        dz_c = act_canonical[:, 2]
+        grip = act_canonical[:, 3]
+
+        dx = dy_c / 1.2
+        dy = dx_c
+        dz = dz_c
+        return np.stack([dx, dy, dz, grip], axis=-1)
+
+    def predict(self, raw_point_cloud_512x3, raw_agent_pos_9d):
         """
         Inputs:
-            point_cloud_512x3: (512, 3) numpy array
-            agent_pos_9d: (9,) numpy array [ee_pos (3), finger_right (3), finger_left (3)]
+            raw_point_cloud_512x3: (512, 3) raw metric point cloud from camera
+            raw_agent_pos_9d: (9,) [ee_tip (3), finger_right (3), finger_left (3)]
         Returns:
-            actions: (n_action_steps, 4) numpy array [dx, dy, dz, gripper_act]
+            actions: (n_action_steps, 4) Dobot Cartesian deltas [dx, dy, dz, grip]
         """
+        pc_canonical = self.to_canonical_frame(raw_point_cloud_512x3)
+
+        ee = self.to_canonical_frame(raw_agent_pos_9d[:3])
+        fr = self.to_canonical_frame(raw_agent_pos_9d[3:6])
+        fl = self.to_canonical_frame(raw_agent_pos_9d[6:9])
+        agent_pos_canonical = np.concatenate([ee, fr, fl]).astype(np.float32)
+
         obs_item = {
-            "point_cloud": torch.from_numpy(point_cloud_512x3).float(),
-            "agent_pos": torch.from_numpy(agent_pos_9d).float()
+            "point_cloud": torch.from_numpy(pc_canonical).float(),
+            "agent_pos": torch.from_numpy(agent_pos_canonical).float()
         }
 
         if len(self.obs_history) == 0:
@@ -104,7 +142,6 @@ class DobotDP3Controller:
             if len(self.obs_history) > self.n_obs_steps:
                 self.obs_history.pop(0)
 
-        # Build batched tensors
         batch_pc = torch.stack([x["point_cloud"] for x in self.obs_history], dim=0).unsqueeze(0).to(self.device)
         batch_pos = torch.stack([x["agent_pos"] for x in self.obs_history], dim=0).unsqueeze(0).to(self.device)
 
@@ -115,6 +152,7 @@ class DobotDP3Controller:
 
         with torch.no_grad():
             res = self.policy.predict_action(obs_dict)
-            actions = res["action"][0].cpu().numpy()
+            acts_c = res["action"][0].cpu().numpy()
 
-        return actions[:self.n_action_steps]
+        acts_dobot = self.actions_to_dobot(acts_c[:self.n_action_steps])
+        return acts_dobot

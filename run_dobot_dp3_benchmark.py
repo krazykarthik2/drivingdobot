@@ -1,6 +1,6 @@
 """
 Autonomous 3D DP3 Multi-Color Box Sorting Benchmark.
-Directly queries the 3D Diffusion Policy (DP3) model (`dp3_official/latest_binpicking.ckpt`)
+Directly queries the official 3D Diffusion Policy (DP3) model (`dp3_official/latest_binpicking.ckpt`)
 using real-time 3D Point Clouds (512x3) and robot state (9d) to drive Dobot Magician.
 ZERO oracle coordinates, ZERO cheating, and complete HD video generation.
 """
@@ -46,12 +46,9 @@ def run_dp3_closed_loop_benchmark():
         cname = item["color"]
         print(f"\n>>> Running 3D DP3 Policy on {cname.upper()} Box <<<")
 
-        # Run closed-loop diffusion policy steps
-        max_steps = 35
-        reached_plate = False
-
+        max_steps = 30
         for step in range(max_steps):
-            # 1. Observe scene via 3D point cloud & robot state
+            # 1. Observe scene via 3D point cloud & robot state (no box oracle info)
             pc = env.get_point_cloud(num_points=512)
             robot_state = env.get_robot_state_9d()
 
@@ -61,24 +58,21 @@ def run_dp3_closed_loop_benchmark():
             # 3. Execute predicted action chunk on Dobot
             for act in actions:
                 # act: [dx, dy, dz, gripper_signal]
-                # Scale delta motions safely within robot workspace limits
-                dx = np.clip(act[0] * 0.015, -0.02, 0.02)
-                dy = np.clip(act[1] * 0.015, -0.02, 0.02)
-                dz = np.clip(act[2] * 0.015, -0.02, 0.02)
+                dx = np.clip(act[0] * 0.012, -0.015, 0.015)
+                dy = np.clip(act[1] * 0.012, -0.015, 0.015)
+                dz = np.clip(act[2] * 0.012, -0.015, 0.015)
                 gripper_close = bool(act[3] < 0.0)
 
                 tip_curr[0] = np.clip(tip_curr[0] + dx, 0.16, 0.28)
-                tip_curr[1] = np.clip(tip_curr[1] + dy, -0.15, 0.15)
-                tip_curr[2] = np.clip(tip_curr[2] + dz, -0.040, 0.080)
+                tip_curr[1] = np.clip(tip_curr[1] + dy, -0.14, 0.14)
+                tip_curr[2] = np.clip(tip_curr[2] + dz, -0.038, 0.080)
 
                 env.set_cartesian_target(tip_curr[0], tip_curr[1], tip_curr[2], gripper_close=gripper_close)
                 record()
 
-            # Check physical success
             succ, dist = env.check_task_success(cname)
             if succ:
                 print(f"Step {step}: Task {cname.upper()} satisfied! Delta XY: {dist*1000:.1f} mm")
-                reached_plate = True
                 break
 
         succ, dist = env.check_task_success(cname)
