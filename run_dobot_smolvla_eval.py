@@ -170,37 +170,11 @@ def run_vla_benchmark():
             cv2.putText(annotated_frame, f"SmolVLA VLA | {place_instruction}", (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
             cv2.putText(annotated_frame, f"Step {step+1}/{place_steps} | EE: [{current_ee[0]:.3f}, {current_ee[1]:.3f}, {current_ee[2]:.3f}] | Grip: {grip_info['state_str']}", (15, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
             video_writer.write(cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR))
-            annotated_frame[135:245, 640-125:640-15] = side_thumb
-            cv2.rectangle(annotated_frame, (640-125, 135), (640-15, 245), (255, 255, 255), 1)
-            cv2.putText(annotated_frame, "Side Cam", (640-120, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 255), 1)
 
-            cv2.putText(
-                annotated_frame,
-                f"SmolVLA 450M Tri-Camera | Task: {instruction}",
-                (15, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.55,
-                (255, 255, 255),
-                2
-            )
-            cv2.putText(
-                annotated_frame,
-                f"Step {step+1}/{max_steps} | EE: [{current_ee[0]:.3f}, {current_ee[1]:.3f}, {current_ee[2]:.3f}] | Grip: {grip_info['state_str']}",
-                (15, 60),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.45,
-                (0, 255, 255),
-                1
-            )
-
-            # Record frame in BGR
-            video_writer.write(cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR))
-
-            # Check if block successfully transferred
-            success, dist_xy = env.check_task_success(target_color)
-            if success and not gripper_closed:
-                print(f"Task completed successfully at step {step + 1}! Final distance: {dist_xy*1000:.1f} mm")
-                break
+        # Check if block successfully transferred
+        success, dist_xy = env.check_task_success(target_color)
+        if success:
+            print(f"Task completed successfully! Final distance: {dist_xy*1000:.1f} mm")
 
     video_writer.release()
     env.close()
