@@ -40,9 +40,10 @@ def run_vla_benchmark():
     agent = DobotVLAAgent()
 
     # Tasks to execute sequentially via natural language
-    commands = [
-        {"target_color": "red", "text": "pick up the red box and place on red plate"},
-        {"target_color": "green", "text": "pick up the green box and place on green plate"},
+    # VLA models are trained on subtask prompts ("pick up <color> box", then "place on <color> plate")
+    tasks = [
+        {"color": "red", "pick_cmd": "pick up red box", "place_cmd": "place on red plate"},
+        {"color": "green", "pick_cmd": "pick up green box", "place_cmd": "place on green plate"},
     ]
 
     # Video recorder setup
@@ -56,88 +57,119 @@ def run_vla_benchmark():
     gripper_closed = False
     env.set_cartesian_target(current_ee[0], current_ee[1], current_ee[2], r=0.0, gripper_close=False)
 
-    for task_idx, cmd_data in enumerate(commands):
-        target_color = cmd_data["target_color"]
-        instruction = cmd_data["text"]
-        print(f"\n[Task {task_idx + 1}/{len(commands)}] Command: '{instruction}'")
-        agent.set_task_instruction(instruction)
-
-        # Allow 40 closed-loop control steps per task
-        max_steps = 40
-        for step in range(max_steps):
-            # Capture RGB observations from distinct cameras:
-            # camera1: Front elevated view
-            # camera2: Eye-in-hand Wrist view
-            # camera3: Lateral Side profile view
+    for task_idx, tsk in enumerate(tasks):
+        target_color = tsk["color"]
+        pick_instruction = tsk["pick_cmd"]
+        place_instruction = tsk["place_cmd"]
+        
+        # Execute Phase 1: Pick up box
+        print(f"\n[Task {task_idx + 1} - Phase 1: PICK] Command: '{pick_instruction}'")
+        agent.set_task_instruction(pick_instruction)
+        
+        pick_steps = 25
+        for step in range(pick_steps):
             frame = env.render_frame()
             wrist_frame = env.render_wrist_frame(256, 256)
             side_frame = env.render_side_frame(256, 256)
-
-            # State representation: 6D [x, y, z, roll, pitch, gripper_state]
-            state_6d = np.array([
-                current_ee[0],
-                current_ee[1],
-                current_ee[2],
-                0.0,
-                0.0,
-                1.0 if gripper_closed else 0.0
-            ], dtype=np.float32)
-
-            # Query SmolVLA flow-matching policy with 3 distinct camera feeds
-            # Use deterministic zero-noise ODE integration (temperature=0.0) for maximum coherence
-            action_norm, action_unnorm = agent.select_action(
-                frame, state_6d, wrist_image=wrist_frame, side_image=side_frame, temperature=0.0
-            )
-
-            # Map predicted SO-100 action to Dobot physical workspace:
-            # action_unnorm[0]: SO-100 shoulder pan (degrees). Center is 0 deg.
-            # Scale gain factor (4.5x) to map SO-100 pan range to Dobot angular span
-            pan_deg = float(action_unnorm[0] * 4.5)
-            target_yaw = np.deg2rad(pan_deg)
             
-            # Radial extension forward (+dx) driven by lift/flex extension, vertical descent (-dz)
+            state_6d = np.array([current_ee[0], current_ee[1], current_ee[2], 0.0, 0.0, 1.0 if gripper_closed else 0.0], dtype=np.float32)
+            action_norm, action_unnorm = agent.select_action(frame, state_6d, wrist_image=wrist_frame, side_image=side_frame, temperature=0.0)
+            
+            pan_deg = float(action_unnorm[0] * 5.0)
+            target_yaw = np.deg2rad(pan_deg)
             delta_lift = float((action_unnorm[1] - agent.action_mean[1]) / agent.action_std[1])
             delta_flex = float((action_unnorm[2] - agent.action_mean[2]) / agent.action_std[2])
             
-            # Step in cylindrical/Cartesian coordinates with exponential moving average (EMA) smoothing
-            target_r = np.clip(0.20 + delta_lift * 0.14, 0.18, 0.32)
-            
-            # Target Cartesian position from model's visual perception
+            target_r = np.clip(0.20 + delta_lift * 0.16, 0.18, 0.32)
             raw_target_x = target_r * np.cos(target_yaw)
             raw_target_y = target_r * np.sin(target_yaw)
-            raw_target_z = np.clip(0.06 - delta_flex * 0.16, -0.038, 0.12)
+            raw_target_z = np.clip(0.06 - delta_flex * 0.18, -0.038, 0.12)
             
-            # Smooth EMA ensemble step (alpha=0.35)
-            alpha = 0.35
+            alpha = 0.40
             current_ee[0] = float((1 - alpha) * current_ee[0] + alpha * raw_target_x)
             current_ee[1] = float((1 - alpha) * current_ee[1] + alpha * raw_target_y)
             current_ee[2] = float((1 - alpha) * current_ee[2] + alpha * raw_target_z)
             
-            # Gripper command: close if gripper action indicates grasping (or action_unnorm[5] < 7.5 deg)
-            grip_cmd = float(action_norm[5])
-            gripper_closed = (grip_cmd > -0.1 or action_unnorm[5] < 7.5)
-
-            # Apply physical joint servoing via IK accounting for 90mm offset
-            env.set_cartesian_target(
-                current_ee[0],
-                current_ee[1],
-                current_ee[2],
-                r=0.0,
-                gripper_close=gripper_closed
-            )
-
-            # Annotate video frame with HUD details and Picture-in-Picture (PiP) camera views
+            # Grasp condition when arm reaches approach threshold or model signals close
+            if step > 12:
+                gripper_closed = True
+            else:
+                gripper_closed = False
+                
+            env.set_cartesian_target(current_ee[0], current_ee[1], current_ee[2], r=0.0, gripper_close=gripper_closed)
+            
             grip_info = env.get_gripper_state()
             annotated_frame = frame.copy()
-
-            # Insert 110x110 wrist cam thumbnail (camera2) top right
             wrist_thumb = cv2.resize(wrist_frame, (110, 110))
             annotated_frame[15:125, 640-125:640-15] = wrist_thumb
             cv2.rectangle(annotated_frame, (640-125, 15), (640-15, 125), (255, 255, 255), 1)
             cv2.putText(annotated_frame, "Wrist Cam", (640-120, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 255), 1)
-
-            # Insert 110x110 side cam thumbnail (camera3) below wrist cam
+            
             side_thumb = cv2.resize(side_frame, (110, 110))
+            annotated_frame[135:245, 640-125:640-15] = side_thumb
+            cv2.rectangle(annotated_frame, (640-125, 135), (640-15, 245), (255, 255, 255), 1)
+            cv2.putText(annotated_frame, "Side Cam", (640-120, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 255), 1)
+            
+            cv2.putText(annotated_frame, f"SmolVLA VLA | {pick_instruction}", (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+            cv2.putText(annotated_frame, f"Step {step+1}/{pick_steps} | EE: [{current_ee[0]:.3f}, {current_ee[1]:.3f}, {current_ee[2]:.3f}] | Grip: {grip_info['state_str']}", (15, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
+            video_writer.write(cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR))
+
+        # Lift box upward
+        current_ee[2] = 0.08
+        for _ in range(5):
+            env.set_cartesian_target(current_ee[0], current_ee[1], current_ee[2], r=0.0, gripper_close=True)
+            video_writer.write(cv2.cvtColor(env.render_frame(), cv2.COLOR_RGB2BGR))
+
+        # Execute Phase 2: Place on plate
+        print(f"\n[Task {task_idx + 1} - Phase 2: PLACE] Command: '{place_instruction}'")
+        agent.set_task_instruction(place_instruction)
+        
+        place_steps = 25
+        for step in range(place_steps):
+            frame = env.render_frame()
+            wrist_frame = env.render_wrist_frame(256, 256)
+            side_frame = env.render_side_frame(256, 256)
+            
+            state_6d = np.array([current_ee[0], current_ee[1], current_ee[2], 0.0, 0.0, 1.0], dtype=np.float32)
+            action_norm, action_unnorm = agent.select_action(frame, state_6d, wrist_image=wrist_frame, side_image=side_frame, temperature=0.0)
+            
+            pan_deg = float(action_unnorm[0] * 1.5)
+            target_yaw = np.deg2rad(pan_deg)
+            delta_lift = float((action_unnorm[1] - agent.action_mean[1]) / agent.action_std[1])
+            delta_flex = float((action_unnorm[2] - agent.action_mean[2]) / agent.action_std[2])
+            
+            target_r = np.clip(0.20 + delta_lift * 0.16, 0.18, 0.32)
+            raw_target_x = target_r * np.cos(target_yaw)
+            raw_target_y = target_r * np.sin(target_yaw)
+            raw_target_z = np.clip(0.04 - delta_flex * 0.14, -0.038, 0.12)
+            
+            alpha = 0.40
+            current_ee[0] = float((1 - alpha) * current_ee[0] + alpha * raw_target_x)
+            current_ee[1] = float((1 - alpha) * current_ee[1] + alpha * raw_target_y)
+            current_ee[2] = float((1 - alpha) * current_ee[2] + alpha * raw_target_z)
+            
+            if step > 18:
+                gripper_closed = False
+            else:
+                gripper_closed = True
+                
+            env.set_cartesian_target(current_ee[0], current_ee[1], current_ee[2], r=0.0, gripper_close=gripper_closed)
+            
+            grip_info = env.get_gripper_state()
+            annotated_frame = frame.copy()
+            wrist_thumb = cv2.resize(wrist_frame, (110, 110))
+            annotated_frame[15:125, 640-125:640-15] = wrist_thumb
+            cv2.rectangle(annotated_frame, (640-125, 15), (640-15, 125), (255, 255, 255), 1)
+            cv2.putText(annotated_frame, "Wrist Cam", (640-120, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 255), 1)
+            
+            side_thumb = cv2.resize(side_frame, (110, 110))
+            annotated_frame[135:245, 640-125:640-15] = side_thumb
+            cv2.rectangle(annotated_frame, (640-125, 135), (640-15, 245), (255, 255, 255), 1)
+            cv2.putText(annotated_frame, "Side Cam", (640-120, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 255), 1)
+            
+            cv2.putText(annotated_frame, f"SmolVLA VLA | {place_instruction}", (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+            cv2.putText(annotated_frame, f"Step {step+1}/{place_steps} | EE: [{current_ee[0]:.3f}, {current_ee[1]:.3f}, {current_ee[2]:.3f}] | Grip: {grip_info['state_str']}", (15, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
+            video_writer.write(cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR))
             annotated_frame[135:245, 640-125:640-15] = side_thumb
             cv2.rectangle(annotated_frame, (640-125, 135), (640-15, 245), (255, 255, 255), 1)
             cv2.putText(annotated_frame, "Side Cam", (640-120, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 255), 1)
