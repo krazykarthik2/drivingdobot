@@ -48,11 +48,11 @@ class DobotColorBoxEnv:
         p.setGravity(0, 0, -9.81)
         p.setTimeStep(1.0 / 240.0)
 
-        # Centered Front 45-degree elevated camera
-        self.cam_target = [0.22, 0.0, -0.04]
-        self.cam_eye = [0.52, 0.0, 0.26]
+        # Calibrated Front 45-degree elevated camera matching standard manipulation benchmarks
+        self.cam_target = [0.20, 0.0, -0.04]
+        self.cam_eye = [0.42, 0.0, 0.32]
         self.cam_up = [0.0, 0.0, 1.0]
-        self.fov = 52.0
+        self.fov = 45.0
 
         self.view_matrix = p.computeViewMatrix(
             cameraEyePosition=self.cam_eye,
@@ -61,7 +61,7 @@ class DobotColorBoxEnv:
         )
         self.proj_matrix = p.computeProjectionMatrixFOV(
             fov=self.fov,
-            aspect=float(width) / float(height),
+            aspect=1.0,
             nearVal=0.05,
             farVal=2.5
         )
@@ -83,7 +83,11 @@ class DobotColorBoxEnv:
     def _load_robot_and_scene(self):
         p.resetSimulation()
         p.setGravity(0, 0, -9.81)
-        self.plane_id = p.loadURDF("plane.urdf", [0, 0, -0.05])
+
+        # Natural table surface matching robot tabletop domains
+        col_t = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.5, 0.5, 0.02])
+        vis_t = p.createVisualShape(p.GEOM_BOX, halfExtents=[0.5, 0.5, 0.02], rgbaColor=[0.32, 0.25, 0.20, 1.0])
+        self.plane_id = p.createMultiBody(0, col_t, vis_t, [0.20, 0.0, -0.07])
 
         # Load Dobot URDF
         urdf_path = os.path.abspath(
