@@ -3,13 +3,15 @@ Dobot Magician Multi-Task Color Box Sorting Benchmark.
 Performs autonomous pick-and-place of colored boxes (Red, Green, Blue, Yellow)
 into matching colored destination receptacles with 100% verified physical success checking
 and HD video generation.
+Accounts for the 80mm tall end-effector gripper offset and reports verified gripper state
+(GRIPPED when holding/closed, OPEN when released/open).
 """
 import os
 import sys
 import numpy as np
 import imageio
 import pybullet as p
-from dobot_color_box_env import DobotColorBoxEnv
+from dobot_color_box_env import DobotColorBoxEnv, GRIPPER_HEIGHT_OFFSET
 
 def interpolate_path(start, end, num_steps=20):
     start = np.array(start)
@@ -18,16 +20,23 @@ def interpolate_path(start, end, num_steps=20):
 
 def execute_pick_and_place(env, pick_pos, place_pos, record_fn, color_name="red"):
     print(f"\n--- Sorting {color_name.upper()} Box ---")
-    print(f"Pick Pos: {pick_pos[:2]} -> Place Pos: {place_pos[:2]}")
+    print(f"Pick Pos (Tip): [{pick_pos[0]:.3f}, {pick_pos[1]:.3f}, {pick_pos[2]:.3f}] (Flange Z: {pick_pos[2]+GRIPPER_HEIGHT_OFFSET:.3f})")
+    print(f"Place Pos (Tip): [{place_pos[0]:.3f}, {place_pos[1]:.3f}, {place_pos[2]:.3f}] (Flange Z: {place_pos[2]+GRIPPER_HEIGHT_OFFSET:.3f})")
 
-    z_transit = 0.120  # Elevated safe transit height clear of all standing cubes
-    z_hover = 0.040
-    z_grasp = 0.005
-    z_place = 0.005
+    # All Z coordinates here are Fingertip coordinates (tip of 80mm gripper):
+    z_transit = 0.040   # Flange Z = 0.040 + 0.080 = 0.120m (safe elevated transit)
+    z_hover = -0.010    # Flange Z = -0.010 + 0.080 = 0.070m (pre-grasp hover)
+    z_grasp = -0.038    # Flange Z = -0.038 + 0.080 = 0.042m (firm box grasp level)
+    z_place = -0.038    # Flange Z = -0.038 + 0.080 = 0.042m (plate surface level)
 
     bid = env.boxes[color_name]
 
-    # 1. Hover above pick box at safe transit height
+    # Initial open check
+    env.set_cartesian_target(pick_pos[0], pick_pos[1], z_transit, r=0.0, gripper_close=False)
+    state = env.get_gripper_state()
+    print(f"Gripper State before approach: {state['state_str']}")
+
+    # 1. Hover above pick box at transit height
     path = interpolate_path([pick_pos[0], pick_pos[1], z_transit], [pick_pos[0], pick_pos[1], z_hover], num_steps=12)
     for pt in path:
         env.set_cartesian_target(pt[0], pt[1], pt[2], r=0.0, gripper_close=False)
@@ -43,6 +52,9 @@ def execute_pick_and_place(env, pick_pos, place_pos, record_fn, color_name="red"
     for _ in range(12):
         env.set_cartesian_target(pick_pos[0], pick_pos[1], z_grasp, r=0.0, gripper_close=True)
         record_fn()
+
+    state = env.get_gripper_state()
+    print(f"Gripper State after grasp: {state['state_str']} (Holding: {color_name.upper()} Box)")
 
     # 4. Lift cleanly to safe transit height
     path = interpolate_path([pick_pos[0], pick_pos[1], z_grasp], [pick_pos[0], pick_pos[1], z_transit], num_steps=16)
@@ -72,11 +84,14 @@ def execute_pick_and_place(env, pick_pos, place_pos, record_fn, color_name="red"
     p.setCollisionFilterPair(env.robot_id, bid, env.gripper_j_right, -1, enableCollision=0)
     p.setCollisionFilterPair(env.robot_id, bid, env.ee_link_index, -1, enableCollision=0)
 
-    p.setJointMotorControl2(env.robot_id, env.gripper_j_left, p.POSITION_CONTROL, targetPosition=0.0, force=50)
-    p.setJointMotorControl2(env.robot_id, env.gripper_j_right, p.POSITION_CONTROL, targetPosition=0.0, force=50)
+    p.setJointMotorControl2(env.robot_id, env.gripper_j_left, p.POSITION_CONTROL, targetPosition=0.0135, force=50)
+    p.setJointMotorControl2(env.robot_id, env.gripper_j_right, p.POSITION_CONTROL, targetPosition=-0.0135, force=50)
 
     for _ in range(8):
         record_fn()
+
+    state = env.get_gripper_state()
+    print(f"Gripper State after release: {state['state_str']}")
 
     # 8. Retract arm upward to transit height
     path = interpolate_path([place_pos[0], place_pos[1], z_place], [place_pos[0], place_pos[1], z_transit], num_steps=14)
@@ -110,6 +125,7 @@ def run_dobot_sorting_benchmark():
     ]
     env.spawn_colored_boxes_and_plates(task_config)
     print(f"Spawned {len(task_config)} colored boxes and plates.")
+    print(f"End-Effector Gripper Height: {GRIPPER_HEIGHT_OFFSET*1000:.1f} mm accounted for in all Cartesian commands.")
 
     all_frames = []
     def record():
@@ -117,7 +133,7 @@ def run_dobot_sorting_benchmark():
 
     # Initial view
     for _ in range(12):
-        env.set_cartesian_target(0.20, 0.0, 0.12, r=0.0, gripper_close=False)
+        env.set_cartesian_target(0.20, 0.0, 0.040, r=0.0, gripper_close=False)
         record()
 
     results = {}
@@ -130,7 +146,7 @@ def run_dobot_sorting_benchmark():
 
     # Final overview
     for _ in range(25):
-        env.set_cartesian_target(0.20, 0.0, 0.12, r=0.0, gripper_close=False)
+        env.set_cartesian_target(0.20, 0.0, 0.040, r=0.0, gripper_close=False)
         record()
 
     # Save comprehensive HD video

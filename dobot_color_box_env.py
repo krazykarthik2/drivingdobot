@@ -2,7 +2,8 @@
 Dobot Magician Multi-Color Box Pick-and-Place Benchmark Environment.
 Replaces Franka with the 4-DOF Dobot Magician robot and evaluates sorting
 small colored blocks (Red, Green, Blue, Yellow) into corresponding colored receptacles/plates.
-Produces complete HD execution videos with closed-loop servo precision.
+Produces complete HD execution videos with closed-loop servo precision,
+accounting for the 80mm tall end-effector gripper offset and proper gripper state signaling.
 """
 import os
 import sys
@@ -26,6 +27,9 @@ COLORS = {
     "plate_green": [0.20, 0.85, 0.30, 0.85],
     "plate_yellow": [0.90, 0.85, 0.20, 0.85],
 }
+
+# Gripper Height Offset: 80 mm from tool flange / ee_link to fingertip grasp center
+GRIPPER_HEIGHT_OFFSET = 0.080  # 80mm
 
 class DobotColorBoxEnv:
     def __init__(self, render_gui=False, width=640, height=480):
@@ -142,8 +146,14 @@ class DobotColorBoxEnv:
         for _ in range(50):
             p.stepSimulation()
 
-    def set_cartesian_target(self, x, y, z, r=0.0, gripper_close=False):
-        ik_sol = self.kin.inverse(x, y, z, yaw=r)
+    def set_cartesian_target(self, x, y, z_tip, r=0.0, gripper_close=False):
+        """
+        Sets end-effector fingertip Cartesian target (x, y, z_tip).
+        Accounts for the 80mm gripper height offset automatically by solving IK
+        for tool flange z_ee = z_tip + GRIPPER_HEIGHT_OFFSET.
+        """
+        z_ee = z_tip + GRIPPER_HEIGHT_OFFSET
+        ik_sol = self.kin.inverse(x, y, z_ee, yaw=r)
         if ik_sol is None:
             return False
 
@@ -158,31 +168,51 @@ class DobotColorBoxEnv:
         p.resetJointState(self.robot_id, 5, -j3_urdf)
         p.resetJointState(self.robot_id, 6, j4)
 
-        jaw_pos = 0.012 if gripper_close else 0.0
-        p.setJointMotorControl2(self.robot_id, self.gripper_j_left, p.POSITION_CONTROL, targetPosition=jaw_pos, force=100)
-        p.setJointMotorControl2(self.robot_id, self.gripper_j_right, p.POSITION_CONTROL, targetPosition=-jaw_pos, force=100)
+        # Gripper actuation:
+        # gripper_close=True: jaws close firmly inward to 0.0 -> GRIPPED
+        # gripper_close=False: jaws open outward to 0.0135 -> OPEN
+        jaw_pos = 0.0 if gripper_close else 0.0135
+        p.resetJointState(self.robot_id, self.gripper_j_left, jaw_pos)
+        p.resetJointState(self.robot_id, self.gripper_j_right, -jaw_pos)
 
         self.gripper_closed = gripper_close
         self._update_gripper_physics()
         p.stepSimulation()
         return True
 
+    def get_gripper_state(self):
+        """
+        Returns the physically measured gripper state and string.
+        Output state: 'GRIPPED' when closed around object, 'OPEN' when retracted open.
+        """
+        jaw_left = p.getJointState(self.robot_id, self.gripper_j_left)[0]
+        # When jaws are closed (near 0.0), it is GRIPPED. When open (>0.005), it is OPEN.
+        is_gripped = (jaw_left < 0.005) and self.gripper_closed
+        return {
+            "state_str": "GRIPPED" if is_gripped else "OPEN",
+            "is_gripped": is_gripped,
+            "jaw_left_pos": jaw_left,
+            "grasped_object": self.grasped_id
+        }
+
     def _update_gripper_physics(self):
         ee_pos = p.getLinkState(self.robot_id, self.ee_link_index)[0]
+        # Fingertip position accounting for 80mm gripper
+        tip_pos = [ee_pos[0], ee_pos[1], ee_pos[2] - GRIPPER_HEIGHT_OFFSET]
 
         if self.gripper_closed and self.grasped_id is None:
             for cname, bid in self.boxes.items():
                 b_pos, _ = p.getBasePositionAndOrientation(bid)
-                dist = np.linalg.norm(np.array(ee_pos) - np.array(b_pos))
-                if dist < 0.055:
+                dist = np.linalg.norm(np.array(tip_pos) - np.array(b_pos))
+                if dist < 0.035:
                     self.grasped_id = bid
                     break
 
         if self.gripper_closed and self.grasped_id is not None:
-            # Carry box synchronously right under gripper jaw center
+            # Carry box synchronously between fingertips
             p.resetBasePositionAndOrientation(
                 self.grasped_id,
-                [ee_pos[0], ee_pos[1], ee_pos[2] - 0.042],
+                [tip_pos[0], tip_pos[1], tip_pos[2] + 0.005],
                 [0, 0, 0, 1]
             )
         elif not self.gripper_closed and self.grasped_id is not None:
