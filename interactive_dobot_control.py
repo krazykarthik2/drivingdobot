@@ -41,8 +41,8 @@ class InteractiveDobotControl:
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
-        # Calibrator & Sim Environment
-        self.calibrator = ArucoAutoCalibrator(output_size=(640, 480), layout="perimeter")
+        # Calibrator configured for 8x8cm seamless grid: [0, 1] / [2, 3]
+        self.calibrator = ArucoAutoCalibrator(output_size=(640, 480))
         self.env = DobotColorBoxEnv(render_gui=False, width=640, height=480)
         
         # Spawn tabletop scenario

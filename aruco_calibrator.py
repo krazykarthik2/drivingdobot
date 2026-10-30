@@ -2,11 +2,13 @@
 aruco_calibrator.py
 
 Universal ArUco Camera-to-Robot Calibrator for Dobot Magician & SmolVLA.
-- Detects 4 table markers (IDs 0, 1, 2, 3) anywhere in the camera view.
-- Computes perspective homography to automatically rectify tilt, height, and angle variations.
-- Warps arbitrary webcam views into canonical 256x256 RGB observations for SmolVLA.
-- Provides direct bidirectional mapping:
-    (camera pixel u, v) <---> (Dobot physical X_mm, Y_mm)
+Configured for:
+Four 8cm x 8cm (80mm x 80mm) markers placed seamlessly side-by-side with NO GAPS in a 2x2 grid:
+    Top Row:    [ ID 0 ] [ ID 1 ]
+    Bottom Row: [ ID 2 ] [ ID 3 ]
+
+Total Grid Footprint: 160 mm wide x 160 mm deep.
+Center-to-Center Pitch between adjacent markers = exactly 80.0 mm.
 """
 
 import cv2
@@ -18,59 +20,52 @@ class ArucoAutoCalibrator:
         self,
         output_size=(256, 256),
         dict_type=cv2.aruco.DICT_4X4_50,
-        layout="perimeter"
+        grid_base_x_mm=140.0,
+        grid_center_y_mm=0.0,
+        marker_size_mm=80.0
     ):
         """
-        layout="perimeter":
-            ID 0 (Top-Left):     X = +300 mm, Y = -150 mm
-            ID 1 (Top-Right):    X = +300 mm, Y = +150 mm
-            ID 2 (Bottom-Right): X = +150 mm, Y = +150 mm
-            ID 3 (Bottom-Left):  X = +150 mm, Y = -150 mm
+        Marker Grid Geometry:
+        Four 80mm x 80mm markers touching edge-to-edge with NO gaps:
+            [ ID 0 ] (Top-Left)     |  [ ID 1 ] (Top-Right)
+            ------------------------+------------------------
+            [ ID 2 ] (Bottom-Left)  |  [ ID 3 ] (Bottom-Right)
 
-        layout="compact":
-            4 touching 80mm markers near Dobot base:
-            ID 0: X = 120 mm, Y = -40 mm
-            ID 1: X = 120 mm, Y = +40 mm
-            ID 2: X = 200 mm, Y = +40 mm
-            ID 3: X = 200 mm, Y = -40 mm
+        From the front camera perspective facing the Dobot base:
+        - Top row (closer to Dobot base): X = grid_base_x_mm + 80 + 40 = 260 mm (or custom)
+          ID 0 (Top-Left):  X = 260.0 mm, Y = -40.0 mm
+          ID 1 (Top-Right): X = 260.0 mm, Y = +40.0 mm
+        - Bottom row (closer to camera):
+          ID 2 (Bottom-Left):  X = 180.0 mm, Y = -40.0 mm
+          ID 3 (Bottom-Right): X = 180.0 mm, Y = +40.0 mm
         """
         self.output_size = output_size  # (width, height)
         self.dict_type = dict_type
         self.dictionary = cv2.aruco.getPredefinedDictionary(dict_type)
         self.parameters = cv2.aruco.DetectorParameters()
         self.detector = cv2.aruco.ArucoDetector(self.dictionary, self.parameters)
-        self.layout = layout
+        self.marker_size_mm = marker_size_mm
 
         # Physical Workspace Definition (in Dobot Millimeters)
-        # Looking from front of table towards Dobot:
-        # Screen Top (v=0): Far from camera, near Dobot base (e.g. X = +350 mm)
-        # Screen Bottom (v=h-1): Close to camera/edge (e.g. X = +100 mm)
-        # Screen Left (u=0): Y = -160 mm
-        # Screen Right (u=w-1): Y = +160 mm
+        # Covers reach envelope: X in [100, 340], Y in [-150, 150]
         self.x_min_mm = 100.0
-        self.x_max_mm = 350.0
-        self.y_min_mm = -160.0
-        self.y_max_mm = 160.0
+        self.x_max_mm = 340.0
+        self.y_min_mm = -150.0
+        self.y_max_mm = 150.0
 
-        w, h = self.output_size
+        # Exact physical center coordinates for 80mm touching markers (NO GAPS):
+        # Center of ID 0 to ID 1 distance = 80mm
+        # Center of ID 2 to ID 3 distance = 80mm
+        # Center of ID 0 to ID 2 distance = 80mm
+        # Center of ID 1 to ID 3 distance = 80mm
+        self.marker_phys_coords = {
+            0: (260.0, -40.0),  # Top-Left (Near Base, Robot Right)
+            1: (260.0, +40.0),  # Top-Right (Near Base, Robot Left)
+            2: (180.0, -40.0),  # Bottom-Left (Front, Robot Right)
+            3: (180.0, +40.0),  # Bottom-Right (Front, Robot Left)
+        }
 
-        if layout == "perimeter":
-            # Real table perimeter positions for IDs 0, 1, 2, 3
-            self.marker_phys_coords = {
-                0: (300.0, -150.0),
-                1: (300.0, +150.0),
-                2: (150.0, +150.0),
-                3: (150.0, -150.0),
-            }
-        else:
-            self.marker_phys_coords = {
-                0: (120.0, -40.0),
-                1: (120.0, +40.0),
-                2: (200.0, +40.0),
-                3: (200.0, -40.0),
-            }
-
-        # Convert physical (X_mm, Y_mm) to target rectified output pixels (u, v)
+        # Precompute target pixel coordinates in rectified frame
         self.dst_center_pts = np.array([
             self.dobot_to_pixel(*self.marker_phys_coords[0]),
             self.dobot_to_pixel(*self.marker_phys_coords[1]),
@@ -115,7 +110,7 @@ class ArucoAutoCalibrator:
 
     def calibrate(self, frame: np.ndarray) -> tuple:
         """
-        Computes the 3x3 homography matrix H from live camera frame to canonical output space.
+        Computes the 3x3 homography matrix H using the exact 80x80mm seamless grid layout.
         Returns: (success: bool, status_message: str)
         """
         centers, _, _, _ = self.detect_markers(frame)
@@ -125,6 +120,7 @@ class ArucoAutoCalibrator:
         if missing:
             return False, f"Missing ArUco markers: IDs {missing}. Detected: {list(centers.keys())}"
 
+        # Match detected points in exact order: ID 0, ID 1, ID 2, ID 3
         src_pts = np.array([centers[mid] for mid in required_ids], dtype=np.float32)
         H, _ = cv2.findHomography(src_pts, self.dst_center_pts)
 
@@ -175,7 +171,7 @@ class ArucoAutoCalibrator:
             cv2.polylines(debug_view, [poly_pts], isClosed=True, color=(0, 255, 0), thickness=2)
             cv2.putText(
                 debug_view,
-                "CALIBRATED WORKSPACE",
+                "CALIBRATED WORKSPACE (8x8cm Seamless Grid)",
                 (poly_pts[0][0], max(poly_pts[0][1] - 10, 25)),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.55,
