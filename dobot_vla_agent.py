@@ -73,15 +73,16 @@ class DobotVLAAgent:
         print(f"[DobotVLAAgent] Active Task Instruction: '{text_instruction}'")
 
     @torch.no_grad()
-    def select_action(self, rgb_image: np.ndarray, robot_state: np.ndarray, wrist_image: np.ndarray = None, side_image: np.ndarray = None) -> np.ndarray:
+    def select_action(self, rgb_image: np.ndarray, robot_state: np.ndarray, wrist_image: np.ndarray = None, side_image: np.ndarray = None, temperature: float = 0.0) -> tuple:
         """
         rgb_image: (H, W, 3) front camera view (camera1)
         robot_state: (6,) float robot state
         wrist_image: (H, W, 3) wrist camera view (camera2)
         side_image: (H, W, 3) side camera view (camera3)
+        temperature: Flow-matching sampling temperature (0.0 = deterministic ODE flow from mode, <1.0 = low noise)
         
         Returns:
-            np.ndarray of shape (6,): [dx, dy, dz, droll, dpitch, gripper]
+            (action_norm, action_unnorm)
         """
         # Preprocess front camera image (camera1)
         img_resized = cv2.resize(rgb_image, (256, 256))
@@ -120,8 +121,22 @@ class DobotVLAAgent:
             "observation.language.attention_mask": self.attention_mask,
         }
 
+        # Temperature-scaled initial noise for flow-matching ODE:
+        # temperature = 0.0 -> deterministic zero-noise ODE integration (maximum mode coherence)
+        # temperature < 1.0 -> reduced variance sampling
+        if temperature <= 1e-4:
+            noise = torch.zeros(
+                1, self.policy.config.chunk_size, self.policy.config.max_action_dim,
+                device=self.device, dtype=self.policy.dtype
+            )
+        else:
+            noise = torch.randn(
+                1, self.policy.config.chunk_size, self.policy.config.max_action_dim,
+                device=self.device, dtype=self.policy.dtype
+            ) * temperature
+
         # Predict physical action step via flow matching
-        action_tensor = self.policy.select_action(batch)
+        action_tensor = self.policy.select_action(batch, noise=noise)
         if isinstance(action_tensor, torch.Tensor):
             action_norm = action_tensor.detach().cpu().numpy().squeeze()
         else:

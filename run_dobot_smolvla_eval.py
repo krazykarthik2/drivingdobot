@@ -84,7 +84,10 @@ def run_vla_benchmark():
             ], dtype=np.float32)
 
             # Query SmolVLA flow-matching policy with 3 distinct camera feeds
-            action_norm, action_unnorm = agent.select_action(frame, state_6d, wrist_image=wrist_frame, side_image=side_frame)
+            # Use deterministic zero-noise ODE integration (temperature=0.0) for maximum coherence
+            action_norm, action_unnorm = agent.select_action(
+                frame, state_6d, wrist_image=wrist_frame, side_image=side_frame, temperature=0.0
+            )
 
             # Map predicted SO-100 action to Dobot physical workspace:
             # action_unnorm[0]: SO-100 shoulder pan (degrees). Center is 0 deg.
@@ -110,9 +113,9 @@ def run_vla_benchmark():
             current_ee[1] = float((1 - alpha) * current_ee[1] + alpha * raw_target_y)
             current_ee[2] = float((1 - alpha) * current_ee[2] + alpha * raw_target_z)
             
-            # Gripper command: close if gripper action indicates grasping (or action_unnorm[5] < 8 deg)
+            # Gripper command: close if gripper action indicates grasping (or action_unnorm[5] < 7.5 deg)
             grip_cmd = float(action_norm[5])
-            gripper_closed = (grip_cmd > -0.1 or action_unnorm[5] < 7.0)
+            gripper_closed = (grip_cmd > -0.1 or action_unnorm[5] < 7.5)
 
             # Apply physical joint servoing via IK accounting for 90mm offset
             env.set_cartesian_target(
