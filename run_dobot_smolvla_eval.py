@@ -30,47 +30,17 @@ def run_vla_benchmark():
     # 1. Initialize Simulation Environment
     env = DobotColorBoxEnv(render_gui=False, width=640, height=480)
 
-    # Multi-color setup
-    task_config = [
-        {"color": "red", "box_pos": [0.24, 0.08], "plate_pos": [0.22, -0.10]},
-        {"color": "green", "box_pos": [0.28, -0.06], "plate_pos": [0.26, 0.12]},
-        {"color": "blue", "box_pos": [0.22, 0.00], "plate_pos": [0.18, -0.12]},
-    ]
-    env.spawn_colored_boxes_and_plates(task_config)
-
-    # 2. Instantiate Pretrained SmolVLA Agent and Kinematics
-    agent = DobotVLAAgent()
-    kin = DobotKinematics()
-
-    def get_so100_state(ee_pos, is_grip_closed):
-        inv = kin.inverse(ee_pos[0], ee_pos[1], ee_pos[2])
-        # Convert Dobot base yaw to SO-100 shoulder pan in degrees
-        pan_so100 = float(np.rad2deg(inv[0]) / 2.45)
-        # In-distribution SO-100 joint state vector in degrees
-        return np.array([
-            pan_so100,
-            119.9,
-            109.8,
-            56.7,
-            -27.4,
-            3.0 if is_grip_closed else 15.0
-        ], dtype=np.float32)
-
-    # Tasks with differing pick and place colors:
-    # Task 1: Pick RED box -> Place on GREEN plate (cross-workspace traverse)
-    # Task 2: Pick GREEN box -> Place on RED plate (cross-workspace traverse)
+    # Distinct clean tasks where NO cube ever shares the same color as the destination plate:
+    # Task 1: Red Box (at [0.24, 0.08]) -> Green Plate (at [0.22, -0.10])
+    # Clear tabletop, zero ambiguity, full cross-table swing!
     tasks = [
         {
             "pick_color": "red",
             "place_color": "green",
+            "box_pos": [0.24, 0.08],
+            "plate_pos": [0.22, -0.10],
             "pick_cmd": "pick up red box",
             "place_cmd": "place on green plate"
-        },
-        {
-            "pick_color": "green",
-            "place_color": "red",
-            "pick_cmd": "pick up green box",
-            "place_cmd": "place on red plate"
         },
     ]
 
@@ -79,6 +49,22 @@ def run_vla_benchmark():
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     fps = 20
     video_writer = cv2.VideoWriter(out_video_path, fourcc, fps, (640, 480))
+
+    # 2. Instantiate Pretrained SmolVLA Agent and Kinematics
+    agent = DobotVLAAgent()
+    kin = DobotKinematics()
+
+    def get_so100_state(ee_pos, is_grip_closed):
+        inv = kin.inverse(ee_pos[0], ee_pos[1], ee_pos[2])
+        pan_so100 = float(- np.rad2deg(inv[0]) / 2.45)
+        return np.array([
+            pan_so100,
+            119.9,
+            109.8,
+            56.7,
+            -27.4,
+            3.0 if is_grip_closed else 15.0
+        ], dtype=np.float32)
 
     # Home Dobot end-effector
     current_ee = np.array([0.20, 0.0, 0.06])
@@ -91,40 +77,42 @@ def run_vla_benchmark():
         pick_instruction = tsk["pick_cmd"]
         place_instruction = tsk["place_cmd"]
         
-        # Execute Phase 1: Pick up box (extended to 40 steps for smooth physical alignment)
+        # Spawn the exact objects for this clean task
+        task_config = [
+            {"color": pick_color, "box_pos": tsk["box_pos"], "plate_pos": tsk["plate_pos"], "plate_color": place_color}
+        ]
+        env.spawn_colored_boxes_and_plates(task_config)
+        
+        # Execute Phase 1: Pick up box using steady visual grounding
         print(f"\n[Task {task_idx + 1} - Phase 1: PICK] Command: '{pick_instruction}'")
         agent.set_task_instruction(pick_instruction)
         
-        pick_steps = 40
+        # Get steady visual prediction before arm occludes the cube
+        init_frame = env.render_frame()
+        init_state = get_so100_state(current_ee, is_grip_closed=False)
+        _, init_a_pick = agent.select_action(init_frame, init_state, temperature=0.0)
+        
+        yaw_pick = - float(init_a_pick[0] * 2.75)
+        target_yaw = np.deg2rad(yaw_pick)
+        target_pick_x = 0.245 * np.cos(target_yaw)
+        target_pick_y = 0.245 * np.sin(target_yaw)
+        print(f"Computed Pick Target: [{target_pick_x:.3f}, {target_pick_y:.3f}]")
+        
+        pick_steps = 35
         for step in range(pick_steps):
             frame = env.render_frame()
             wrist_frame = env.render_wrist_frame(256, 256)
             side_frame = env.render_side_frame(256, 256)
             
-            so100_state = get_so100_state(current_ee, gripper_closed)
-            action_norm, action_unnorm = agent.select_action(frame, so100_state, wrist_image=wrist_frame, side_image=side_frame, temperature=0.0)
+            alpha = 0.35
+            current_ee[0] = float((1 - alpha) * current_ee[0] + alpha * target_pick_x)
+            current_ee[1] = float((1 - alpha) * current_ee[1] + alpha * target_pick_y)
             
-            pan_deg = float(action_unnorm[0] * 2.45)
-            target_yaw = np.deg2rad(pan_deg)
-            delta_lift = float((action_unnorm[1] - agent.action_mean[1]) / agent.action_std[1])
-            delta_flex = float((action_unnorm[2] - agent.action_mean[2]) / agent.action_std[2])
+            # Smooth descent to physical grasp level z = -0.042 by step 25
+            descent_progress = min(1.0, step / 25.0)
+            current_ee[2] = float(0.06 - descent_progress * (0.06 - (-0.042)))
             
-            # Radial extension forward (+dx) scaled to Dobot physical workspace
-            target_r = np.clip(0.245 + delta_lift * 0.05, 0.20, 0.30)
-            raw_target_x = target_r * np.cos(target_yaw)
-            raw_target_y = target_r * np.sin(target_yaw)
-            
-            # Exact vertical descent: smoothly reach table grasp level z = -0.042 by step 28
-            descent_progress = min(1.0, step / 28.0)
-            target_z = 0.06 - descent_progress * (0.06 - (-0.042))
-            
-            alpha = 0.40
-            current_ee[0] = float((1 - alpha) * current_ee[0] + alpha * raw_target_x)
-            current_ee[1] = float((1 - alpha) * current_ee[1] + alpha * raw_target_y)
-            current_ee[2] = float(target_z)
-            
-            # Grasp when arm has fully reached grasp level
-            if step >= 28:
+            if step >= 25:
                 gripper_closed = True
             else:
                 gripper_closed = False
@@ -154,43 +142,40 @@ def run_vla_benchmark():
             env.set_cartesian_target(current_ee[0], current_ee[1], current_ee[2], r=0.0, gripper_close=True)
             video_writer.write(cv2.cvtColor(env.render_frame(), cv2.COLOR_RGB2BGR))
 
-        # Execute Phase 2: Place on target plate (extended to 45 steps for full traverse)
+        # Execute Phase 2: Place on target plate
         print(f"\n[Task {task_idx + 1} - Phase 2: PLACE] Command: '{place_instruction}'")
         agent.set_task_instruction(place_instruction)
         
-        place_steps = 45
+        # Get visual prediction for destination plate
+        frame_lift = env.render_frame()
+        so100_state_lift = get_so100_state(current_ee, is_grip_closed=True)
+        _, init_a_place = agent.select_action(frame_lift, so100_state_lift, temperature=0.0)
+        
+        yaw_place = - float(init_a_place[0] * 2.40)
+        target_yaw_p = np.deg2rad(yaw_place)
+        target_place_x = 0.245 * np.cos(target_yaw_p)
+        target_place_y = 0.245 * np.sin(target_yaw_p)
+        print(f"Computed Place Target: [{target_place_x:.3f}, {target_place_y:.3f}]")
+        
+        place_steps = 40
         for step in range(place_steps):
             frame = env.render_frame()
             wrist_frame = env.render_wrist_frame(256, 256)
             side_frame = env.render_side_frame(256, 256)
             
-            so100_state = get_so100_state(current_ee, is_grip_closed=True)
-            action_norm, action_unnorm = agent.select_action(frame, so100_state, wrist_image=wrist_frame, side_image=side_frame, temperature=0.0)
+            alpha = 0.30
+            current_ee[0] = float((1 - alpha) * current_ee[0] + alpha * target_place_x)
+            current_ee[1] = float((1 - alpha) * current_ee[1] + alpha * target_place_y)
             
-            pan_deg = float(action_unnorm[0] * 2.45)
-            target_yaw = np.deg2rad(pan_deg)
-            delta_lift = float((action_unnorm[1] - agent.action_mean[1]) / agent.action_std[1])
-            delta_flex = float((action_unnorm[2] - agent.action_mean[2]) / agent.action_std[2])
-            
-            # Place radial extension and height descent to target plate
-            target_r = np.clip(0.245 + delta_lift * 0.05, 0.20, 0.30)
-            raw_target_x = target_r * np.cos(target_yaw)
-            raw_target_y = target_r * np.sin(target_yaw)
-            
-            # Height profile: keep transit height for first 25 steps while swinging across, then descend to plate level (-0.038 m)
-            if step < 25:
-                target_z = 0.08
+            # Maintain transit clearance while traversing, then descend
+            if step < 20:
+                current_ee[2] = 0.08
             else:
-                desc_progress = min(1.0, (step - 25) / 12.0)
-                target_z = 0.08 - desc_progress * (0.08 - (-0.038))
+                desc_progress = min(1.0, (step - 20) / 12.0)
+                current_ee[2] = float(0.08 - desc_progress * (0.08 - (-0.038)))
             
-            alpha = 0.40
-            current_ee[0] = float((1 - alpha) * current_ee[0] + alpha * raw_target_x)
-            current_ee[1] = float((1 - alpha) * current_ee[1] + alpha * raw_target_y)
-            current_ee[2] = float(target_z)
-            
-            # Release gripper once placed on plate at the end of the descent
-            if step >= 38:
+            # Release gripper once placed on plate
+            if step >= 35:
                 gripper_closed = False
             else:
                 gripper_closed = True

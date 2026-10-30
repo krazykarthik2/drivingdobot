@@ -119,7 +119,9 @@ class DobotColorBoxEnv:
             b_pos = item["box_pos"]
             p_pos = item["plate_pos"]
             rgba = COLORS.get(cname, [0.5, 0.5, 0.5, 1.0])
-            plate_rgba = COLORS.get(f"plate_{cname}", [0.5, 0.5, 0.5, 0.8])
+            # Support explicit plate_color or fallback to f"plate_{cname}"
+            plate_color_name = item.get("plate_color", cname)
+            plate_rgba = COLORS.get(f"plate_{plate_color_name}", COLORS.get(plate_color_name, [0.5, 0.5, 0.5, 0.8]))
 
             # Spawn Box
             col_b = p.createCollisionShape(p.GEOM_BOX, halfExtents=box_half)
@@ -145,7 +147,7 @@ class DobotColorBoxEnv:
                 baseOrientation=[0, 0, 0, 1]
             )
             p.changeDynamics(pid, -1, lateralFriction=1.8)
-            self.plates[cname] = pid
+            self.plates[plate_color_name] = pid
 
         # Settle
         for _ in range(50):
