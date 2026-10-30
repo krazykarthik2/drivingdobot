@@ -75,15 +75,19 @@ def run_vla_benchmark():
             state_6d = np.array([current_ee[0], current_ee[1], current_ee[2], 0.0, 0.0, 1.0 if gripper_closed else 0.0], dtype=np.float32)
             action_norm, action_unnorm = agent.select_action(frame, state_6d, wrist_image=wrist_frame, side_image=side_frame, temperature=0.0)
             
-            pan_deg = float(action_unnorm[0] * 5.0)
+            pan_deg = float(action_unnorm[0] * 2.45)
             target_yaw = np.deg2rad(pan_deg)
             delta_lift = float((action_unnorm[1] - agent.action_mean[1]) / agent.action_std[1])
             delta_flex = float((action_unnorm[2] - agent.action_mean[2]) / agent.action_std[2])
             
-            target_r = np.clip(0.20 + delta_lift * 0.16, 0.18, 0.32)
+            # Radial extension forward (+dx) scaled to Dobot physical workspace
+            target_r = np.clip(0.245 + delta_lift * 0.05, 0.20, 0.30)
             raw_target_x = target_r * np.cos(target_yaw)
             raw_target_y = target_r * np.sin(target_yaw)
-            raw_target_z = np.clip(0.06 - delta_flex * 0.18, -0.038, 0.12)
+            
+            # Height profile: descend smoothly to table grasp level (-0.038 m) during pick approach
+            target_z_approach = 0.06 - (step / float(pick_steps)) * 0.098
+            raw_target_z = np.clip(target_z_approach - delta_flex * 0.02, -0.038, 0.10)
             
             alpha = 0.40
             current_ee[0] = float((1 - alpha) * current_ee[0] + alpha * raw_target_x)
@@ -91,7 +95,7 @@ def run_vla_benchmark():
             current_ee[2] = float((1 - alpha) * current_ee[2] + alpha * raw_target_z)
             
             # Grasp condition when arm reaches approach threshold or model signals close
-            if step > 12:
+            if step > 14:
                 gripper_closed = True
             else:
                 gripper_closed = False
@@ -133,15 +137,19 @@ def run_vla_benchmark():
             state_6d = np.array([current_ee[0], current_ee[1], current_ee[2], 0.0, 0.0, 1.0], dtype=np.float32)
             action_norm, action_unnorm = agent.select_action(frame, state_6d, wrist_image=wrist_frame, side_image=side_frame, temperature=0.0)
             
-            pan_deg = float(action_unnorm[0] * 1.5)
+            pan_deg = float(action_unnorm[0] * 2.45)
             target_yaw = np.deg2rad(pan_deg)
             delta_lift = float((action_unnorm[1] - agent.action_mean[1]) / agent.action_std[1])
             delta_flex = float((action_unnorm[2] - agent.action_mean[2]) / agent.action_std[2])
             
-            target_r = np.clip(0.20 + delta_lift * 0.16, 0.18, 0.32)
+            # Place radial extension and height descent to target plate
+            target_r = np.clip(0.245 + delta_lift * 0.05, 0.20, 0.30)
             raw_target_x = target_r * np.cos(target_yaw)
             raw_target_y = target_r * np.sin(target_yaw)
-            raw_target_z = np.clip(0.04 - delta_flex * 0.14, -0.038, 0.12)
+            
+            # Height profile: lower box to plate level (-0.038 m) during final place approach
+            target_z_place = 0.06 - (step / float(place_steps)) * 0.098
+            raw_target_z = np.clip(target_z_place - delta_flex * 0.02, -0.038, 0.10)
             
             alpha = 0.40
             current_ee[0] = float((1 - alpha) * current_ee[0] + alpha * raw_target_x)
