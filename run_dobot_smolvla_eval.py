@@ -87,35 +87,32 @@ def run_vla_benchmark():
             action_norm, action_unnorm = agent.select_action(frame, state_6d, wrist_image=wrist_frame, side_image=side_frame)
 
             # Map predicted SO-100 action to Dobot physical workspace:
-            # action_unnorm[0]: SO-100 shoulder pan (degrees). Center is 0 deg. Dobot base yaw corresponds directly.
-            # action_unnorm[1]: SO-100 shoulder lift (degrees). Mean ~ 120 deg.
-            # action_unnorm[2]: SO-100 elbow flex (degrees). Mean ~ 110 deg.
-            # action_unnorm[5]: SO-100 gripper opening / closing
-            target_yaw = np.deg2rad(action_unnorm[0])
+            # action_unnorm[0]: SO-100 shoulder pan (degrees). Center is 0 deg.
+            # Scale gain factor (4.5x) to map SO-100 pan range to Dobot angular span
+            pan_deg = float(action_unnorm[0] * 4.5)
+            target_yaw = np.deg2rad(pan_deg)
             
             # Radial extension forward (+dx) driven by lift/flex extension, vertical descent (-dz)
-            delta_lift = (action_unnorm[1] - agent.action_mean[1]) / agent.action_std[1]
-            delta_flex = (action_unnorm[2] - agent.action_mean[2]) / agent.action_std[2]
+            delta_lift = float((action_unnorm[1] - agent.action_mean[1]) / agent.action_std[1])
+            delta_flex = float((action_unnorm[2] - agent.action_mean[2]) / agent.action_std[2])
             
-            # Step in cylindrical/Cartesian coordinates
-            current_r = np.sqrt(current_ee[0]**2 + current_ee[1]**2)
-            dr = float(np.clip(delta_lift * 0.008, -0.012, 0.012))
-            new_r = np.clip(current_r + dr, 0.18, 0.32)
+            # Step in cylindrical/Cartesian coordinates with exponential moving average (EMA) smoothing
+            target_r = np.clip(0.20 + delta_lift * 0.14, 0.18, 0.32)
             
-            # Target yaw drives x-y orientation
-            target_x = new_r * np.cos(target_yaw)
-            target_y = new_r * np.sin(target_yaw)
+            # Target Cartesian position from model's visual perception
+            raw_target_x = target_r * np.cos(target_yaw)
+            raw_target_y = target_r * np.sin(target_yaw)
+            raw_target_z = np.clip(0.06 - delta_flex * 0.16, -0.038, 0.12)
             
-            dz = float(np.clip(-delta_flex * 0.008, -0.015, 0.015))
-            target_z = np.clip(current_ee[2] + dz, -0.038, 0.12)
+            # Smooth EMA ensemble step (alpha=0.35)
+            alpha = 0.35
+            current_ee[0] = float((1 - alpha) * current_ee[0] + alpha * raw_target_x)
+            current_ee[1] = float((1 - alpha) * current_ee[1] + alpha * raw_target_y)
+            current_ee[2] = float((1 - alpha) * current_ee[2] + alpha * raw_target_z)
             
-            current_ee[0] = float(target_x)
-            current_ee[1] = float(target_y)
-            current_ee[2] = float(target_z)
-            
-            # Continuous gripper threshold (action_unnorm[5] < 10 degrees indicates closed gripper)
+            # Gripper command: close if gripper action indicates grasping (or action_unnorm[5] < 8 deg)
             grip_cmd = float(action_norm[5])
-            gripper_closed = (grip_cmd > 0.0 or action_unnorm[5] < 5.0)
+            gripper_closed = (grip_cmd > -0.1 or action_unnorm[5] < 7.0)
 
             # Apply physical joint servoing via IK accounting for 90mm offset
             env.set_cartesian_target(
