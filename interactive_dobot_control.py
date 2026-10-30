@@ -63,6 +63,7 @@ class InteractiveDobotControl:
         self.is_running = True
         self.active_command = None
         self.command_lock = threading.Lock()
+        self.overlay_enabled = True
 
     def command_listener(self):
         """Background thread listening for user prompts from console."""
@@ -168,13 +169,15 @@ class InteractiveDobotControl:
             h, w = frame.shape[:2]
             self.calibrator.process_frame(frame, auto_calibrate=True)
 
-            if self.calibrator.is_calibrated:
+            if self.calibrator.is_calibrated and self.overlay_enabled:
                 rectified_cam = cv2.warpPerspective(frame, self.calibrator.homography_matrix, (w, h))
                 sim_rgb = self.env.render_frame()
                 sim_bgr = cv2.cvtColor(sim_rgb, cv2.COLOR_RGB2BGR)
 
                 # 0.5 opacity overlay
                 display = cv2.addWeighted(rectified_cam, 0.50, sim_bgr, 0.50, 0.0)
+            elif self.calibrator.is_calibrated and not self.overlay_enabled:
+                display = cv2.warpPerspective(frame, self.calibrator.homography_matrix, (w, h))
             else:
                 display = frame.copy()
                 cv2.putText(display, "Waiting for 4 ArUco markers...", (20, 40),
@@ -182,14 +185,24 @@ class InteractiveDobotControl:
 
             # Draw EE status overlay
             grip_str = "CLOSED" if self.gripper_closed else "OPEN"
-            cv2.rectangle(display, (0, 0), (w, 35), (20, 20, 20), -1)
+            calib_str = "CALIBRATED" if self.calibrator.is_calibrated else "WAITING 4 ARUCO"
+            cv2.rectangle(display, (0, 0), (w, 42), (20, 20, 20), -1)
             cv2.putText(
                 display,
-                f"Dobot EE: [{self.current_ee[0]:.3f}, {self.current_ee[1]:.3f}, {self.current_ee[2]:.3f}] | Grip: {grip_str}",
-                (15, 22),
+                f"Dobot EE: [{self.current_ee[0]:.3f}, {self.current_ee[1]:.3f}, {self.current_ee[2]:.3f}] | Grip: {grip_str} | [{calib_str}]",
+                (15, 20),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.48,
+                0.46,
                 (0, 255, 255),
+                1
+            )
+            cv2.putText(
+                display,
+                "[r] Recalibrate | [SPACE] Toggle Sim Overlay | [q] Exit",
+                (15, 36),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.38,
+                (200, 200, 200),
                 1
             )
 
@@ -198,6 +211,12 @@ class InteractiveDobotControl:
             if key == ord('q') or key == 27:
                 self.is_running = False
                 break
+            elif key == ord('r'):
+                self.calibrator.reset_calibration()
+                print("[INFO] Calibration RESET. Recalibrating from visible markers...")
+            elif key == ord(' '):
+                self.overlay_enabled = not self.overlay_enabled
+                print(f"[INFO] 50/50 Simulation Overlay toggled: {self.overlay_enabled}")
 
         self.cap.release()
         cv2.destroyAllWindows()

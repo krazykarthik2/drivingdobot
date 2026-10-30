@@ -77,6 +77,12 @@ class ArucoAutoCalibrator:
         self.inv_homography_matrix = None
         self.is_calibrated = False
 
+    def reset_calibration(self):
+        """Resets the computed homography matrix and forces recalibration."""
+        self.homography_matrix = None
+        self.inv_homography_matrix = None
+        self.is_calibrated = False
+
     def dobot_to_pixel(self, x_mm: float, y_mm: float) -> list:
         """Maps Dobot physical coordinates (mm) to rectified output pixel (u, v)."""
         w, h = self.output_size
