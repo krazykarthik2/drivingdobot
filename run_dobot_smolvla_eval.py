@@ -18,11 +18,9 @@ import torch
 
 from dobot_color_box_env import DobotColorBoxEnv, GRIPPER_HEIGHT_OFFSET
 from dobot_vla_agent import DobotVLAAgent
-from battery_guard import check_battery_and_hibernate
 
 
 def run_vla_benchmark():
-    check_battery_and_hibernate()
     print("=" * 70)
     print("DOBOT MAGICIAN PRE-TRAINED SmolVLA NATURAL LANGUAGE CLOSED-LOOP EVALUATION")
     print("=" * 70)
@@ -141,7 +139,6 @@ def run_vla_benchmark():
     env.close()
 
     print(f"\n[Completed] Video proof recorded: {out_video_path} (Size: {os.path.getsize(out_video_path) / 1024:.1f} KB)")
-    check_battery_and_hibernate()
 
 
 if __name__ == "__main__":
