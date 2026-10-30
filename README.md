@@ -42,15 +42,20 @@ python run_dobot_smolvla_eval.py
 ```
 Outputs high-resolution demonstration video: `dobot_smolvla_language_benchmark.mp4`.
 
-### 2. Live ArUco Calibration
+### 2. Live Interactive Camera Alignment & 50/50 Simulation Twin Overlay
 ```bash
-python live_aruco_camera.py --camera_id 0
+python interactive_aruco_alignment.py --cam 0
 ```
-Marker layout for table calibration:
-- **ID 0 (Top-Left)**: $X = +300\text{ mm}, Y = -150\text{ mm}$
-- **ID 1 (Top-Right)**: $X = +300\text{ mm}, Y = +150\text{ mm}$
-- **ID 2 (Bottom-Right)**: $X = +150\text{ mm}, Y = +150\text{ mm}$
-- **ID 3 (Bottom-Left)**: $X = +150\text{ mm}, Y = -150\text{ mm}$
+- Real-time on-screen HUD prompts guide your physical webcam height, distance, tilt, and centering.
+- Once coarse alignment is achieved, homography rectifies residual micro-errors automatically.
+- Blends your physical webcam feed directly over the PyBullet simulation robot with 0.5 opacity.
+
+### 3. Prompt-Driven Dobot Manipulation with Live Video Overlay
+```bash
+python interactive_dobot_control.py --cam 0
+```
+- Takes natural language prompts dynamically from the console (e.g., `"pick up red box"`, `"place on green plate"`, `"home"`, `"close gripper"`, `"open gripper"`).
+- Visually grounds commands using SmolVLA and animates the robot in real-time over your physical table stream.
 
 ---
 
