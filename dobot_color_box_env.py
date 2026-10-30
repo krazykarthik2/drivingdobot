@@ -28,8 +28,8 @@ COLORS = {
     "plate_yellow": [0.90, 0.85, 0.20, 0.85],
 }
 
-# Gripper Height Offset: 80 mm from tool flange / ee_link to fingertip grasp center
-GRIPPER_HEIGHT_OFFSET = 0.080  # 80mm
+# Gripper Height Offset: 90 mm from tool flange / ee_link to fingertip grasp center (80mm + 10mm more)
+GRIPPER_HEIGHT_OFFSET = 0.090  # 90mm
 
 class DobotColorBoxEnv:
     def __init__(self, render_gui=False, width=640, height=480):
