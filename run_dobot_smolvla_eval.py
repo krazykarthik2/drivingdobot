@@ -65,8 +65,13 @@ def run_vla_benchmark():
         # Allow 40 closed-loop control steps per task
         max_steps = 40
         for step in range(max_steps):
-            # Capture RGB observation from front camera
+            # Capture RGB observations from distinct cameras:
+            # camera1: Front elevated view
+            # camera2: Eye-in-hand Wrist view
+            # camera3: Lateral Side profile view
             frame = env.render_frame()
+            wrist_frame = env.render_wrist_frame(256, 256)
+            side_frame = env.render_side_frame(256, 256)
 
             # State representation: 6D [x, y, z, roll, pitch, gripper_state]
             state_6d = np.array([
@@ -78,8 +83,8 @@ def run_vla_benchmark():
                 1.0 if gripper_closed else 0.0
             ], dtype=np.float32)
 
-            # Query SmolVLA flow-matching policy
-            action = agent.select_action(frame, state_6d)
+            # Query SmolVLA flow-matching policy with 3 distinct camera feeds
+            action = agent.select_action(frame, state_6d, wrist_image=wrist_frame, side_image=side_frame)
 
             # Map predicted delta action to Dobot physical workspace
             # action: [dx, dy, dz, droll, dpitch, gripper]
@@ -104,12 +109,25 @@ def run_vla_benchmark():
                 gripper_close=gripper_closed
             )
 
-            # Annotate video frame with HUD details
+            # Annotate video frame with HUD details and Picture-in-Picture (PiP) camera views
             grip_info = env.get_gripper_state()
             annotated_frame = frame.copy()
+
+            # Insert 110x110 wrist cam thumbnail (camera2) top right
+            wrist_thumb = cv2.resize(wrist_frame, (110, 110))
+            annotated_frame[15:125, 640-125:640-15] = wrist_thumb
+            cv2.rectangle(annotated_frame, (640-125, 15), (640-15, 125), (255, 255, 255), 1)
+            cv2.putText(annotated_frame, "Wrist Cam", (640-120, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 255), 1)
+
+            # Insert 110x110 side cam thumbnail (camera3) below wrist cam
+            side_thumb = cv2.resize(side_frame, (110, 110))
+            annotated_frame[135:245, 640-125:640-15] = side_thumb
+            cv2.rectangle(annotated_frame, (640-125, 135), (640-15, 245), (255, 255, 255), 1)
+            cv2.putText(annotated_frame, "Side Cam", (640-120, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 255), 1)
+
             cv2.putText(
                 annotated_frame,
-                f"SmolVLA 450M | Task: {instruction}",
+                f"SmolVLA 450M Tri-Camera | Task: {instruction}",
                 (15, 30),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.55,

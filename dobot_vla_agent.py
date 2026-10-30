@@ -69,28 +69,49 @@ class DobotVLAAgent:
         print(f"[DobotVLAAgent] Active Task Instruction: '{text_instruction}'")
 
     @torch.no_grad()
-    def select_action(self, rgb_image: np.ndarray, robot_state: np.ndarray) -> np.ndarray:
+    def select_action(self, rgb_image: np.ndarray, robot_state: np.ndarray, wrist_image: np.ndarray = None, side_image: np.ndarray = None) -> np.ndarray:
         """
-        rgb_image: (H, W, 3) uint8 image in range [0, 255]
-        robot_state: (6,) float numpy array (end-effector [x, y, z, roll, pitch, yaw] or joints)
+        rgb_image: (H, W, 3) front camera view (camera1)
+        robot_state: (6,) float robot state
+        wrist_image: (H, W, 3) wrist camera view (camera2)
+        side_image: (H, W, 3) side camera view (camera3)
         
         Returns:
             np.ndarray of shape (6,): [dx, dy, dz, droll, dpitch, gripper]
         """
-        # Preprocess camera image: resize to 256x256, normalize to [0.0, 1.0], shape (1, 3, 256, 256)
+        # Preprocess front camera image (camera1)
         img_resized = cv2.resize(rgb_image, (256, 256))
         img_tensor = torch.from_numpy(img_resized).permute(2, 0, 1).unsqueeze(0).float() / 255.0
         img_tensor = img_tensor.to(self.device)
 
+        # Preprocess wrist camera image (camera2)
+        if wrist_image is not None:
+            w_resized = cv2.resize(wrist_image, (256, 256))
+            wrist_tensor = torch.from_numpy(w_resized).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+            wrist_tensor = wrist_tensor.to(self.device)
+        else:
+            wrist_tensor = img_tensor
+
+        # Preprocess side camera image (camera3)
+        if side_image is not None:
+            s_resized = cv2.resize(side_image, (256, 256))
+            side_tensor = torch.from_numpy(s_resized).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+            side_tensor = side_tensor.to(self.device)
+        else:
+            side_tensor = img_tensor
+
         # Low-dimensional robot state: shape (1, 6)
         state_tensor = torch.from_numpy(robot_state.astype(np.float32)).unsqueeze(0).to(self.device)
 
-        # Assemble full batch dictionary conforming to SmolVLA multimodal specifications
+        # Assemble full batch dictionary conforming to SmolVLA multimodal specifications:
+        # camera1: Front elevated view
+        # camera2: Eye-in-hand Wrist view
+        # camera3: Lateral Side profile view
         batch = {
             "observation.state": state_tensor,
             "observation.images.camera1": img_tensor,
-            "observation.images.camera2": img_tensor,
-            "observation.images.camera3": img_tensor,
+            "observation.images.camera2": wrist_tensor,
+            "observation.images.camera3": side_tensor,
             "observation.language.tokens": self.input_ids,
             "observation.language.attention_mask": self.attention_mask,
         }

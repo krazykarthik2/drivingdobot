@@ -262,6 +262,64 @@ class DobotColorBoxEnv:
         indices = np.random.choice(pts_filtered.shape[0], num_points, replace=(len(pts_filtered) < num_points))
         return pts_filtered[indices].astype(np.float32)
 
+    def render_side_frame(self, width=256, height=256):
+        """
+        Renders secondary third-person perspective (camera3 / side view) at [0.24, -0.36, 0.32],
+        providing lateral depth perception orthogonal to the front camera.
+        """
+        side_eye = [0.24, -0.36, 0.32]
+        side_target = [0.20, 0.0, -0.04]
+        side_up = [0.0, 0.0, 1.0]
+
+        view_mat = p.computeViewMatrix(
+            cameraEyePosition=side_eye,
+            cameraTargetPosition=side_target,
+            cameraUpVector=side_up
+        )
+        proj_mat = p.computeProjectionMatrixFOV(
+            fov=45.0,
+            aspect=float(width) / float(height),
+            nearVal=0.05,
+            farVal=2.5
+        )
+        _, _, rgb, _, _ = p.getCameraImage(
+            width=width,
+            height=height,
+            viewMatrix=view_mat,
+            projectionMatrix=proj_mat,
+            renderer=p.ER_TINY_RENDERER
+        )
+        return rgb[:, :, :3]
+
+    def render_wrist_frame(self, width=256, height=256):
+        """
+        Renders eye-in-hand wrist camera observation mounted directly on the gripper carriage.
+        Tracks the end-effector in real-time, looking down through the fingertip pinch opening.
+        """
+        ee_pos, ee_orn = p.getLinkState(self.robot_id, self.ee_link_index)[:2]
+        wrist_eye = np.array(ee_pos) + np.array([-0.05, 0.0, -0.02])
+        wrist_target = np.array(ee_pos) + np.array([0.0, 0.0, -0.09])
+        
+        view_mat = p.computeViewMatrix(
+            cameraEyePosition=wrist_eye.tolist(),
+            cameraTargetPosition=wrist_target.tolist(),
+            cameraUpVector=[0, 0, 1]
+        )
+        proj_mat = p.computeProjectionMatrixFOV(
+            fov=70.0,
+            aspect=float(width) / float(height),
+            nearVal=0.01,
+            farVal=1.5
+        )
+        _, _, rgb, _, _ = p.getCameraImage(
+            width=width,
+            height=height,
+            viewMatrix=view_mat,
+            projectionMatrix=proj_mat,
+            renderer=p.ER_TINY_RENDERER
+        )
+        return rgb[:, :, :3]
+
     def render_frame(self):
         _, _, rgb, _, _ = p.getCameraImage(
             width=self.width,
