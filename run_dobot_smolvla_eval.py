@@ -19,6 +19,7 @@ import pybullet as p
 
 from dobot_color_box_env import DobotColorBoxEnv, GRIPPER_HEIGHT_OFFSET
 from dobot_vla_agent import DobotVLAAgent
+from dobot_kinematics import DobotKinematics
 
 
 def run_vla_benchmark():
@@ -37,12 +38,27 @@ def run_vla_benchmark():
     ]
     env.spawn_colored_boxes_and_plates(task_config)
 
-    # 2. Instantiate Pretrained SmolVLA Agent
+    # 2. Instantiate Pretrained SmolVLA Agent and Kinematics
     agent = DobotVLAAgent()
+    kin = DobotKinematics()
 
-    # Tasks with differing pick and place colors to rigorously verify VLA instruction comprehension:
-    # Task 1: Pick RED box -> Place on GREEN plate
-    # Task 2: Pick GREEN box -> Place on RED plate
+    def get_so100_state(ee_pos, is_grip_closed):
+        inv = kin.inverse(ee_pos[0], ee_pos[1], ee_pos[2])
+        # Convert Dobot base yaw to SO-100 shoulder pan in degrees
+        pan_so100 = float(np.rad2deg(inv[0]) / 2.45)
+        # In-distribution SO-100 joint state vector in degrees
+        return np.array([
+            pan_so100,
+            119.9,
+            109.8,
+            56.7,
+            -27.4,
+            3.0 if is_grip_closed else 15.0
+        ], dtype=np.float32)
+
+    # Tasks with differing pick and place colors:
+    # Task 1: Pick RED box -> Place on GREEN plate (cross-workspace traverse)
+    # Task 2: Pick GREEN box -> Place on RED plate (cross-workspace traverse)
     tasks = [
         {
             "pick_color": "red",
@@ -75,18 +91,18 @@ def run_vla_benchmark():
         pick_instruction = tsk["pick_cmd"]
         place_instruction = tsk["place_cmd"]
         
-        # Execute Phase 1: Pick up box
+        # Execute Phase 1: Pick up box (extended to 40 steps for smooth physical alignment)
         print(f"\n[Task {task_idx + 1} - Phase 1: PICK] Command: '{pick_instruction}'")
         agent.set_task_instruction(pick_instruction)
         
-        pick_steps = 25
+        pick_steps = 40
         for step in range(pick_steps):
             frame = env.render_frame()
             wrist_frame = env.render_wrist_frame(256, 256)
             side_frame = env.render_side_frame(256, 256)
             
-            state_6d = np.array([current_ee[0], current_ee[1], current_ee[2], 0.0, 0.0, 1.0 if gripper_closed else 0.0], dtype=np.float32)
-            action_norm, action_unnorm = agent.select_action(frame, state_6d, wrist_image=wrist_frame, side_image=side_frame, temperature=0.0)
+            so100_state = get_so100_state(current_ee, gripper_closed)
+            action_norm, action_unnorm = agent.select_action(frame, so100_state, wrist_image=wrist_frame, side_image=side_frame, temperature=0.0)
             
             pan_deg = float(action_unnorm[0] * 2.45)
             target_yaw = np.deg2rad(pan_deg)
@@ -98,17 +114,17 @@ def run_vla_benchmark():
             raw_target_x = target_r * np.cos(target_yaw)
             raw_target_y = target_r * np.sin(target_yaw)
             
-            # Exact vertical descent: smoothly reach table grasp level z = -0.042 by step 18
-            descent_progress = min(1.0, step / 18.0)
+            # Exact vertical descent: smoothly reach table grasp level z = -0.042 by step 28
+            descent_progress = min(1.0, step / 28.0)
             target_z = 0.06 - descent_progress * (0.06 - (-0.042))
             
-            alpha = 0.45
+            alpha = 0.40
             current_ee[0] = float((1 - alpha) * current_ee[0] + alpha * raw_target_x)
             current_ee[1] = float((1 - alpha) * current_ee[1] + alpha * raw_target_y)
             current_ee[2] = float(target_z)
             
             # Grasp when arm has fully reached grasp level
-            if step >= 18:
+            if step >= 28:
                 gripper_closed = True
             else:
                 gripper_closed = False
@@ -133,23 +149,23 @@ def run_vla_benchmark():
 
         # Lift box upward to transit height (z = 0.08 m) with box firmly held
         print(f"Lifting {pick_color} box to transit height...")
-        for lift_step in range(10):
-            current_ee[2] = -0.042 + ((lift_step + 1) / 10.0) * (0.08 - (-0.042))
+        for lift_step in range(12):
+            current_ee[2] = -0.042 + ((lift_step + 1) / 12.0) * (0.08 - (-0.042))
             env.set_cartesian_target(current_ee[0], current_ee[1], current_ee[2], r=0.0, gripper_close=True)
             video_writer.write(cv2.cvtColor(env.render_frame(), cv2.COLOR_RGB2BGR))
 
-        # Execute Phase 2: Place on target plate
+        # Execute Phase 2: Place on target plate (extended to 45 steps for full traverse)
         print(f"\n[Task {task_idx + 1} - Phase 2: PLACE] Command: '{place_instruction}'")
         agent.set_task_instruction(place_instruction)
         
-        place_steps = 25
+        place_steps = 45
         for step in range(place_steps):
             frame = env.render_frame()
             wrist_frame = env.render_wrist_frame(256, 256)
             side_frame = env.render_side_frame(256, 256)
             
-            state_6d = np.array([current_ee[0], current_ee[1], current_ee[2], 0.0, 0.0, 1.0], dtype=np.float32)
-            action_norm, action_unnorm = agent.select_action(frame, state_6d, wrist_image=wrist_frame, side_image=side_frame, temperature=0.0)
+            so100_state = get_so100_state(current_ee, gripper_closed=True)
+            action_norm, action_unnorm = agent.select_action(frame, so100_state, wrist_image=wrist_frame, side_image=side_frame, temperature=0.0)
             
             pan_deg = float(action_unnorm[0] * 2.45)
             target_yaw = np.deg2rad(pan_deg)
@@ -161,20 +177,20 @@ def run_vla_benchmark():
             raw_target_x = target_r * np.cos(target_yaw)
             raw_target_y = target_r * np.sin(target_yaw)
             
-            # Height profile: keep transit height for first 12 steps, then descend to plate level (-0.038 m)
-            if step < 12:
+            # Height profile: keep transit height for first 25 steps while swinging across, then descend to plate level (-0.038 m)
+            if step < 25:
                 target_z = 0.08
             else:
-                desc_progress = min(1.0, (step - 12) / 8.0)
+                desc_progress = min(1.0, (step - 25) / 12.0)
                 target_z = 0.08 - desc_progress * (0.08 - (-0.038))
             
-            alpha = 0.45
+            alpha = 0.40
             current_ee[0] = float((1 - alpha) * current_ee[0] + alpha * raw_target_x)
             current_ee[1] = float((1 - alpha) * current_ee[1] + alpha * raw_target_y)
             current_ee[2] = float(target_z)
             
-            # Release gripper once placed on plate
-            if step >= 20:
+            # Release gripper once placed on plate at the end of the descent
+            if step >= 38:
                 gripper_closed = False
             else:
                 gripper_closed = True
