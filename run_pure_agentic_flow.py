@@ -133,21 +133,27 @@ class PureDobotSimEnv:
 
     def step_joint_action(self, target_j1, target_j2, target_j3, target_j4, target_jaw):
         """
-        Direct joint actuation. No Cartesian IK shortcuts.
-        j2 and j3 drive the mechanical parallelogram mimic joints (4 and 5).
+        Actuate Dobot Magician joints.
+        In the real Dobot Magician, a mechanical aluminum parallelogram linkage physically locks
+        the end-effector level with the table regardless of arm angle.
+        In PyBullet simulation, mimic joints 4 and 5 represent this mechanical bar, locked to -j2 and -j3.
         """
         p.setJointMotorControl2(self.robot_id, 1, p.POSITION_CONTROL, targetPosition=target_j1, force=80)
         p.setJointMotorControl2(self.robot_id, 2, p.POSITION_CONTROL, targetPosition=target_j2, force=80)
         p.setJointMotorControl2(self.robot_id, 3, p.POSITION_CONTROL, targetPosition=target_j3, force=80)
-        p.setJointMotorControl2(self.robot_id, 4, p.POSITION_CONTROL, targetPosition=-target_j2, force=80)
-        p.setJointMotorControl2(self.robot_id, 5, p.POSITION_CONTROL, targetPosition=-target_j3, force=80)
         p.setJointMotorControl2(self.robot_id, 6, p.POSITION_CONTROL, targetPosition=target_j4, force=40)
+
+        # Enforce mechanical parallelogram linkage so end-effector stays level and never sags downward
+        p.resetJointState(self.robot_id, 4, -target_j2)
+        p.resetJointState(self.robot_id, 5, -target_j3)
 
         p.setJointMotorControl2(self.robot_id, self.gripper_j_left, p.POSITION_CONTROL, targetPosition=target_jaw, force=30)
         p.setJointMotorControl2(self.robot_id, self.gripper_j_right, p.POSITION_CONTROL, targetPosition=-target_jaw, force=30)
 
         for _ in range(8):
             p.stepSimulation()
+            p.resetJointState(self.robot_id, 4, -target_j2)
+            p.resetJointState(self.robot_id, 5, -target_j3)
 
     def check_contacts(self):
         pts = p.getContactPoints(self.robot_id, self.target_obj_id)
