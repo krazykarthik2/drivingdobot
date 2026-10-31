@@ -220,7 +220,7 @@ def run_3d_mesh_evaluation():
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     video_writer = cv2.VideoWriter(out_video_path, fourcc, 15, (640, 480))
 
-    current_ee = np.array([0.20, 0.0, 0.06], dtype=np.float32)
+    current_ee = np.array([0.20, 0.0, 0.10], dtype=np.float32)
     env.set_cartesian_target(current_ee[0], current_ee[1], current_ee[2], r=0.0, gripper_close=False)
 
     user_goal = "Pick up the coffee mug and place it into the tray"
@@ -232,7 +232,7 @@ def run_3d_mesh_evaluation():
         return np.array([pan, 119.9, 109.8, 56.7, -27.4, 3.0 if is_grip_closed else 15.0], dtype=np.float32)
 
     # -------------------------------------------------------------------------
-    # PHASE 1: Approach Mug (Dynamic Grounding from Camera Pixels)
+    # PHASE 1: Approach Mug (High Clearance Overflight + Pure Vertical Descent)
     # -------------------------------------------------------------------------
     agent.set_task_instruction("pick up coffee mug")
     frame = env.render_frame()
@@ -246,12 +246,12 @@ def run_3d_mesh_evaluation():
     print(f"[VLA Grounding] Predicted Mug Target: [{target_x:.3f}, {target_y:.3f}]")
     sys.stdout.flush()
 
-    for step in range(25):
+    # Stage 1a: High-Altitude Overflight (Hold Z = 0.10m safely above mug height 0.065m)
+    for step in range(18):
         alpha = 0.35
         current_ee[0] = float((1 - alpha) * current_ee[0] + alpha * target_x)
         current_ee[1] = float((1 - alpha) * current_ee[1] + alpha * target_y)
-        desc = min(1.0, step / 22.0)
-        current_ee[2] = float(0.06 - desc * (0.06 - (-0.035)))
+        current_ee[2] = 0.10  # Maintain generous safe clearance above objects
         env.set_cartesian_target(current_ee[0], current_ee[1], current_ee[2], r=0.0, gripper_close=False)
 
         f = env.render_frame().copy()
@@ -260,7 +260,32 @@ def run_3d_mesh_evaluation():
         cv2.rectangle(f, (640-125, 15), (640-15, 125), (255, 255, 255), 1)
 
         cv2.putText(f, f"Goal: {user_goal}", (15, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
-        cv2.putText(f, "Phase 1: Approaching Mug | Distractor: 3D Duck", (15, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 255), 1)
+        cv2.putText(f, "Phase 1a: Overhead Transit (Safe Z=10cm)", (15, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 255), 1)
+        video_writer.write(cv2.cvtColor(f, cv2.COLOR_RGB2BGR))
+
+    # Optional closed-loop re-grounding at overhead waypoint before plunge
+    overhead_f = env.render_frame()
+    overhead_st = get_so100_state(current_ee, is_grip_closed=False)
+    _, a_refine = agent.select_action(overhead_f, overhead_st, temperature=0.0)
+    refine_yaw = np.deg2rad(- float(a_refine[0] * 2.75))
+    target_x = 0.245 * np.cos(refine_yaw)
+    target_y = 0.245 * np.sin(refine_yaw)
+
+    # Stage 1b: Pure Vertical Descent straight down onto the mug
+    for step in range(16):
+        desc = min(1.0, (step + 1) / 16.0)
+        current_ee[0] = float(0.2 * current_ee[0] + 0.8 * target_x)
+        current_ee[1] = float(0.2 * current_ee[1] + 0.8 * target_y)
+        current_ee[2] = float(0.10 - desc * (0.10 - (-0.035)))
+        env.set_cartesian_target(current_ee[0], current_ee[1], current_ee[2], r=0.0, gripper_close=False)
+
+        f = env.render_frame().copy()
+        wrist_f = env.render_wrist_frame(110, 110)
+        f[15:125, 640-125:640-15] = wrist_f
+        cv2.rectangle(f, (640-125, 15), (640-15, 125), (255, 255, 255), 1)
+
+        cv2.putText(f, f"Goal: {user_goal}", (15, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+        cv2.putText(f, "Phase 1b: Vertical Plunge onto Mug", (15, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 255), 1)
         video_writer.write(cv2.cvtColor(f, cv2.COLOR_RGB2BGR))
 
     # -------------------------------------------------------------------------
@@ -279,13 +304,13 @@ def run_3d_mesh_evaluation():
         video_writer.write(cv2.cvtColor(env.render_frame(), cv2.COLOR_RGB2BGR))
 
     # Lift upward
-    for lift in range(12):
-        current_ee[2] = -0.035 + ((lift + 1) / 12.0) * (0.08 - (-0.035))
+    for lift in range(14):
+        current_ee[2] = -0.035 + ((lift + 1) / 14.0) * (0.10 - (-0.035))
         env.set_cartesian_target(current_ee[0], current_ee[1], current_ee[2], r=0.0, gripper_close=True)
         video_writer.write(cv2.cvtColor(env.render_frame(), cv2.COLOR_RGB2BGR))
 
     # -------------------------------------------------------------------------
-    # PHASE 3: Transfer to Tray
+    # PHASE 3: Transfer to Tray (High Clearance Transit at Z=0.10m)
     # -------------------------------------------------------------------------
     agent.set_task_instruction("place into tray")
     f_lift = env.render_frame()
@@ -303,10 +328,10 @@ def run_3d_mesh_evaluation():
         current_ee[0] = float((1 - alpha) * current_ee[0] + alpha * target_place_x)
         current_ee[1] = float((1 - alpha) * current_ee[1] + alpha * target_place_y)
         if t_step < 18:
-            current_ee[2] = 0.08
+            current_ee[2] = 0.10  # keep high during transit across the table
         else:
             desc = min(1.0, (t_step - 18) / 12.0)
-            current_ee[2] = float(0.08 - desc * (0.08 - (-0.030)))
+            current_ee[2] = float(0.10 - desc * (0.10 - (-0.030)))
         env.set_cartesian_target(current_ee[0], current_ee[1], current_ee[2], r=0.0, gripper_close=True)
         video_writer.write(cv2.cvtColor(env.render_frame(), cv2.COLOR_RGB2BGR))
 

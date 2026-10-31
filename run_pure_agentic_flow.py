@@ -91,6 +91,12 @@ class PureDobotSimEnv:
         )
         self.robot_id = p.loadURDF(urdf_path, [0, 0, 0], useFixedBase=True)
 
+        # Enhance end-effector and gripper visual contrast & material rendering
+        p.changeVisualShape(self.robot_id, 5, rgbaColor=[0.25, 0.25, 0.25, 1.0])       # forearm bracket (dark charcoal)
+        p.changeVisualShape(self.robot_id, 6, rgbaColor=[0.12, 0.12, 0.14, 1.0])       # gripper servo core (matte black)
+        p.changeVisualShape(self.robot_id, self.gripper_j_left, rgbaColor=[0.32, 0.32, 0.35, 1.0])   # left jaw (gunmetal)
+        p.changeVisualShape(self.robot_id, self.gripper_j_right, rgbaColor=[0.32, 0.32, 0.35, 1.0])  # right jaw (gunmetal)
+
         p.changeDynamics(self.robot_id, self.gripper_j_left, lateralFriction=4.0, spinningFriction=0.1)
         p.changeDynamics(self.robot_id, self.gripper_j_right, lateralFriction=4.0, spinningFriction=0.1)
 
@@ -152,7 +158,11 @@ class PureDobotSimEnv:
         return np.array(pos)
 
     def render_frame(self):
-        _, _, rgb, _, _ = p.getCameraImage(self.width, self.height, self.view_matrix, self.proj_matrix, renderer=p.ER_TINY_RENDERER)
+        _, _, rgb, _, _ = p.getCameraImage(
+            self.width, self.height, self.view_matrix, self.proj_matrix,
+            lightDirection=[1.0, 0.5, 2.0], lightColor=[1.0, 1.0, 1.0], lightDistance=2.0,
+            shadow=1, renderer=p.ER_TINY_RENDERER
+        )
         return rgb[:, :, :3].copy()
 
     def render_wrist_frame(self, w=128, h=128):
@@ -250,6 +260,7 @@ def run_pure_flow():
     grasp_constraint = None
 
     # 2. Sequential Execution of SmolVLM Subtasks via SmolVLA
+    # STRICT AGENTIC GATING: A stage can NEVER advance unless SmolVLM judges 'Yes.' (subtask_done == True)
     for stage_idx, subtask in enumerate(subtasks):
         print(f"\n=======================================================")
         print(f"STAGE {stage_idx+1}/{len(subtasks)}: Subtask Instruction = '{subtask}'")
@@ -259,121 +270,136 @@ def run_pure_flow():
         vla.set_task_instruction(subtask)
 
         subtask_done = False
-        step_in_stage = 0
-        max_steps_per_stage = 20
+        attempt = 0
+        max_attempts = 3
+        max_steps_per_attempt = 16
 
-        while not subtask_done and step_in_stage < max_steps_per_stage:
-            step_in_stage += 1
-
-            # Sensory Inputs
-            f_rgb = env.render_frame()
-            w_rgb = env.render_wrist_frame(128, 128)
-
-            # Robot proprioception formatted for SmolVLA:
-            # [pan_deg, shoulder_deg, elbow_deg, wrist_deg, roll_deg, gripper_deg]
-            pan_deg = float(np.rad2deg(curr_j1))
-            sh_deg = float(np.rad2deg(curr_j2))
-            el_deg = float(np.rad2deg(curr_j3))
-            grip_deg = 3.0 if curr_jaw < 0.003 else 15.0
-            robot_state = np.array([pan_deg, 119.9 + sh_deg, 109.8 + el_deg, 56.7, -27.4, grip_deg], dtype=np.float32)
-
-            # System 1: SmolVLA predicts motor action directly from pixels & instruction
-            _, unnorm_act = vla.select_action(f_rgb, robot_state, wrist_image=w_rgb, temperature=0.0)
-
-            # unnorm_act: [pan (deg), shoulder, elbow, pitch, roll, gripper]
-            pred_pan_deg = float(unnorm_act[0])
-            pred_grip = float(unnorm_act[5])
-
-            st_lower = subtask.lower()
-            if "move" in st_lower and "mug" in st_lower:
-                # Approach mug azimuth and hold transit height (Z=+0.08m)
-                target_pan = np.arctan2(mug_y, mug_x)
-                curr_j1 = float(0.85 * curr_j1 + 0.15 * target_pan)
-                curr_j2 = float(0.85 * curr_j2 + 0.15 * 0.59)
-                curr_j3 = float(0.85 * curr_j3 + 0.15 * -0.01)
-                curr_jaw = 0.01  # ensure jaws are open during approach
-            elif "grasp" in st_lower:
-                # Plunge down around mug rim (Z=-0.035m)
-                target_pan = np.arctan2(mug_y, mug_x)
-                curr_j1 = float(0.85 * curr_j1 + 0.15 * target_pan)
-                curr_j2 = float(0.85 * curr_j2 + 0.15 * 1.22)
-                curr_j3 = float(0.85 * curr_j3 + 0.15 * -0.16)
-                if curr_j2 > 1.10:
-                    curr_jaw = max(0.0, curr_jaw - 0.003)
-                    if curr_jaw <= 0.001 and grasp_constraint is None:
-                        # Lock mechanical grasp contact constraint (PyBullet fixed grip)
-                        contacts = env.check_contacts()
-                        if contacts > 0 or p.getDistance(env.robot_id, env.target_obj_id, 0.04)[0] < 0.03:
-                            grasp_constraint = p.createConstraint(
-                                env.robot_id, env.gripper_j_left, env.target_obj_id, -1,
-                                p.JOINT_FIXED, [0, 0, 0], [0, 0, 0], [0, 0, 0]
-                            )
-            elif "lift" in st_lower:
-                # Lift arm to transit height (holding mug)
-                curr_j2 = float(0.85 * curr_j2 + 0.15 * 0.59)
-                curr_j3 = float(0.85 * curr_j3 + 0.15 * -0.01)
-                curr_jaw = 0.0
-            elif "tray" in st_lower and "move" in st_lower:
-                # Transit horizontally to tray azimuth
-                target_tray_pan = np.arctan2(tray_y, tray_x)
-                curr_j1 = float(0.85 * curr_j1 + 0.15 * target_tray_pan)
-                curr_j2 = float(0.85 * curr_j2 + 0.15 * 0.59)
-                curr_j3 = float(0.85 * curr_j3 + 0.15 * -0.01)
-                curr_jaw = 0.0
-            elif "place" in st_lower:
-                # Lower into tray and release
-                target_tray_pan = np.arctan2(tray_y, tray_x)
-                curr_j1 = float(0.85 * curr_j1 + 0.15 * target_tray_pan)
-                curr_j2 = float(0.85 * curr_j2 + 0.15 * 1.20)
-                curr_j3 = float(0.85 * curr_j3 + 0.15 * -0.15)
-                if curr_j2 > 1.05:
-                    if grasp_constraint is not None:
-                        p.removeConstraint(grasp_constraint)
-                        grasp_constraint = None
-                    curr_jaw = min(0.01, curr_jaw + 0.003)
-
-            # Step PyBullet joints
-            env.step_joint_action(curr_j1, curr_j2, curr_j3, curr_j4, curr_jaw)
-
-            contacts = env.check_contacts()
-
-            # Video overlay
-            disp = f_rgb.copy()
-            disp[15:115, 640-115:640-15] = cv2.resize(w_rgb, (100, 100))
-            cv2.rectangle(disp, (640-115, 15), (640-15, 115), (255, 255, 255), 1)
-
-            cv2.putText(disp, f"System 2 Subtask [{stage_idx+1}/{len(subtasks)}]: {subtask}", (15, 25),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
-            cv2.putText(disp, f"System 1 Act Pan: {pred_pan_deg:.1f} deg | Grip: {pred_grip:.1f}", (15, 50),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.40, (255, 255, 255), 1)
-            cv2.putText(disp, f"Physical Contacts: {contacts}", (15, 75),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 255, 0), 1)
-            video_writer.append_data(disp)
-
-            # 3. System 2: SmolVLM Visual Judge queries the camera frame to assess milestone completion
-            if step_in_stage >= 10 and (step_in_stage % 4 == 0 or step_in_stage == max_steps_per_stage):
-                if "move" in st_lower and "mug" in st_lower:
-                    q = "Is the robot gripper positioned near or above the coffee mug? Answer YES or NO."
-                elif "grasp" in st_lower:
-                    q = "Is the coffee mug held or touched by the robot gripper? Answer YES or NO."
-                elif "lift" in st_lower:
-                    q = "Is the coffee mug lifted off the table? Answer YES or NO."
-                elif "tray" in st_lower and "move" in st_lower:
-                    q = "Is the robot gripper positioned above the tray? Answer YES or NO."
-                elif "place" in st_lower:
-                    q = "Is the coffee mug inside or on the tray? Answer YES or NO."
-                else:
-                    q = f"Has subtask '{subtask}' succeeded? Answer YES or NO."
-
-                ans = vlm.ask_vlm(f_rgb, q, max_new_tokens=15)
-                is_yes = "yes" in ans.lower()
-                print(f"  [SmolVLM Judge Check @ step {step_in_stage}]: Query='{q}' -> Ans='{ans}' (Done={is_yes})")
+        while not subtask_done and attempt < max_attempts:
+            attempt += 1
+            if attempt > 1:
+                print(f"\n  [STRICT GATE RETRY]: Stage {stage_idx+1} not verified yet. Starting retry attempt {attempt}/{max_attempts}...")
                 sys.stdout.flush()
 
-                if is_yes:
-                    subtask_done = True
-                    print(f"  >>> SmolVLM visually confirmed stage completion! Advancing subtask.")
+            step_in_stage = 0
+            while not subtask_done and step_in_stage < max_steps_per_attempt:
+                step_in_stage += 1
+
+                # Sensory Inputs
+                f_rgb = env.render_frame()
+                w_rgb = env.render_wrist_frame(128, 128)
+
+                # Robot proprioception formatted for SmolVLA:
+                # [pan_deg, shoulder_deg, elbow_deg, wrist_deg, roll_deg, gripper_deg]
+                pan_deg = float(np.rad2deg(curr_j1))
+                sh_deg = float(np.rad2deg(curr_j2))
+                el_deg = float(np.rad2deg(curr_j3))
+                grip_deg = 3.0 if curr_jaw < 0.003 else 15.0
+                robot_state = np.array([pan_deg, 119.9 + sh_deg, 109.8 + el_deg, 56.7, -27.4, grip_deg], dtype=np.float32)
+
+                # System 1: SmolVLA predicts motor action directly from pixels & instruction
+                _, unnorm_act = vla.select_action(f_rgb, robot_state, wrist_image=w_rgb, temperature=0.0)
+
+                # unnorm_act: [pan (deg), shoulder, elbow, pitch, roll, gripper]
+                pred_pan_deg = float(unnorm_act[0])
+                pred_grip = float(unnorm_act[5])
+
+                st_lower = subtask.lower()
+                if "move" in st_lower and "mug" in st_lower:
+                    # Approach mug azimuth and hold transit height (Z=+0.08m)
+                    target_pan = np.arctan2(mug_y, mug_x)
+                    curr_j1 = float(0.80 * curr_j1 + 0.20 * target_pan)
+                    curr_j2 = float(0.80 * curr_j2 + 0.20 * 0.59)
+                    curr_j3 = float(0.80 * curr_j3 + 0.20 * -0.01)
+                    curr_jaw = 0.01  # ensure jaws are open during approach
+                elif "grasp" in st_lower:
+                    # Plunge down around mug rim (Z=-0.035m)
+                    target_pan = np.arctan2(mug_y, mug_x)
+                    curr_j1 = float(0.85 * curr_j1 + 0.15 * target_pan)
+                    curr_j2 = float(0.85 * curr_j2 + 0.15 * 1.22)
+                    curr_j3 = float(0.85 * curr_j3 + 0.15 * -0.16)
+                    if curr_j2 > 1.10:
+                        curr_jaw = max(0.0, curr_jaw - 0.003)
+                        if curr_jaw <= 0.001 and grasp_constraint is None:
+                            # Lock mechanical grasp contact constraint (PyBullet fixed grip)
+                            contacts = env.check_contacts()
+                            if contacts > 0 or p.getDistance(env.robot_id, env.target_obj_id, 0.04)[0] < 0.03:
+                                grasp_constraint = p.createConstraint(
+                                    env.robot_id, env.gripper_j_left, env.target_obj_id, -1,
+                                    p.JOINT_FIXED, [0, 0, 0], [0, 0, 0], [0, 0, 0]
+                                )
+                elif "lift" in st_lower:
+                    # Lift arm to transit height (holding mug)
+                    curr_j2 = float(0.85 * curr_j2 + 0.15 * 0.59)
+                    curr_j3 = float(0.85 * curr_j3 + 0.15 * -0.01)
+                    curr_jaw = 0.0
+                elif "tray" in st_lower and "move" in st_lower:
+                    # Transit horizontally to tray azimuth
+                    target_tray_pan = np.arctan2(tray_y, tray_x)
+                    curr_j1 = float(0.85 * curr_j1 + 0.15 * target_tray_pan)
+                    curr_j2 = float(0.85 * curr_j2 + 0.15 * 0.59)
+                    curr_j3 = float(0.85 * curr_j3 + 0.15 * -0.01)
+                    curr_jaw = 0.0
+                elif "place" in st_lower:
+                    # Lower into tray and release
+                    target_tray_pan = np.arctan2(tray_y, tray_x)
+                    curr_j1 = float(0.85 * curr_j1 + 0.15 * target_tray_pan)
+                    curr_j2 = float(0.85 * curr_j2 + 0.15 * 1.20)
+                    curr_j3 = float(0.85 * curr_j3 + 0.15 * -0.15)
+                    if curr_j2 > 1.05:
+                        if grasp_constraint is not None:
+                            p.removeConstraint(grasp_constraint)
+                            grasp_constraint = None
+                        curr_jaw = min(0.01, curr_jaw + 0.003)
+
+                # Step PyBullet joints
+                env.step_joint_action(curr_j1, curr_j2, curr_j3, curr_j4, curr_jaw)
+
+                contacts = env.check_contacts()
+
+                # Video overlay
+                disp = f_rgb.copy()
+                disp[15:115, 640-115:640-15] = cv2.resize(w_rgb, (100, 100))
+                cv2.rectangle(disp, (640-115, 15), (640-15, 115), (255, 255, 255), 1)
+
+                cv2.putText(disp, f"System 2 Subtask [{stage_idx+1}/{len(subtasks)}]: {subtask}", (15, 25),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
+                cv2.putText(disp, f"System 1 Act Pan: {pred_pan_deg:.1f} deg | Grip: {pred_grip:.1f}", (15, 50),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.40, (255, 255, 255), 1)
+                cv2.putText(disp, f"Physical Contacts: {contacts} | Attempt: {attempt}", (15, 75),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 255, 0), 1)
+                video_writer.append_data(disp)
+
+                # 3. System 2: SmolVLM Visual Judge queries the camera frame to assess milestone completion
+                if step_in_stage >= 8 and (step_in_stage % 4 == 0 or step_in_stage == max_steps_per_attempt):
+                    if "move" in st_lower and "mug" in st_lower:
+                        q = "Is the robot gripper positioned near or above the coffee mug? Answer YES or NO."
+                    elif "grasp" in st_lower:
+                        q = "Is the coffee mug held or touched by the robot gripper? Answer YES or NO."
+                    elif "lift" in st_lower:
+                        q = "Is the coffee mug lifted off the table? Answer YES or NO."
+                    elif "tray" in st_lower and "move" in st_lower:
+                        q = "Is the robot gripper positioned above the tray? Answer YES or NO."
+                    elif "place" in st_lower:
+                        q = "Is the coffee mug inside or on the tray? Answer YES or NO."
+                    else:
+                        q = f"Has subtask '{subtask}' succeeded? Answer YES or NO."
+
+                    ans = vlm.ask_vlm(f_rgb, q, max_new_tokens=15)
+                    is_yes = "yes" in ans.lower()
+                    print(f"  [SmolVLM Judge Check @ step {step_in_stage}]: Query='{q}' -> Ans='{ans}' (Done={is_yes})")
                     sys.stdout.flush()
+
+                    if is_yes:
+                        subtask_done = True
+                        print(f"  >>> SmolVLM visually confirmed stage completion! Advancing subtask.")
+                        sys.stdout.flush()
+
+        # STRICT AGENTIC GATE CHECK:
+        if not subtask_done:
+            print(f"\n[FATAL STAGE FAILURE]: Stage {stage_idx+1} ('{subtask}') failed visual verification after {max_attempts} attempts.")
+            print(f"Halting pipeline cleanly. Will NOT advance to next stage without SmolVLM approval.")
+            sys.stdout.flush()
+            break
 
     video_writer.close()
     print(f"\n[PURE AGENTIC EVALUATION COMPLETE]: Video saved to {out_video_path}")
