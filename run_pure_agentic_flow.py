@@ -329,9 +329,24 @@ def run_pure_flow():
                         if curr_jaw <= 0.003 and grasp_constraint is None:
                             contacts = env.check_contacts()
                             if contacts > 0 or p.getDistance(env.robot_id, env.target_obj_id, 0.04)[0] < 0.03:
+                                # Preserve exact physical position at moment of grasp:
+                                # Calculate relative delta from EE link so object stays locked at EE + delta without snapping or teleporting!
+                                ee_pos, ee_orn = p.getLinkState(env.robot_id, env.ee_link_index)[:2]
+                                obj_pos, obj_orn = p.getBasePositionAndOrientation(env.target_obj_id)
+                                inv_ee_pos, inv_ee_orn = p.invertTransform(ee_pos, ee_orn)
+                                rel_pos, rel_orn = p.multiplyTransforms(inv_ee_pos, inv_ee_orn, obj_pos, obj_orn)
+
                                 grasp_constraint = p.createConstraint(
-                                    env.robot_id, env.gripper_j_left, env.target_obj_id, -1,
-                                    p.JOINT_FIXED, [0, 0, 0], [0, 0, 0], [0, 0, 0]
+                                    parentBodyUniqueId=env.robot_id,
+                                    parentLinkIndex=env.ee_link_index,
+                                    childBodyUniqueId=env.target_obj_id,
+                                    childLinkIndex=-1,
+                                    jointType=p.JOINT_FIXED,
+                                    jointAxis=[0, 0, 0],
+                                    parentFramePosition=rel_pos,
+                                    childFramePosition=[0, 0, 0],
+                                    parentFrameOrientation=rel_orn,
+                                    childFrameOrientation=[0, 0, 0, 1]
                                 )
                 elif "lift" in st_lower:
                     # Lift arm to transit height (holding mug)
