@@ -324,30 +324,30 @@ def run_pure_flow():
                     curr_j1 = float(0.85 * curr_j1 + 0.15 * target_pan)
                     curr_j2 = float(0.85 * curr_j2 + 0.15 * 1.20)
                     curr_j3 = float(0.85 * curr_j3 + 0.15 * -0.15)
-                    if step_in_stage >= 6:
+                    if step_in_stage >= 4:
                         curr_jaw = max(0.0, curr_jaw - 0.002)
-                        if curr_jaw <= 0.003 and grasp_constraint is None:
-                            contacts = env.check_contacts()
-                            if contacts > 0 or p.getDistance(env.robot_id, env.target_obj_id, 0.04)[0] < 0.03:
-                                # Preserve exact physical position at moment of grasp:
-                                # Calculate relative delta from EE link so object stays locked at EE + delta without snapping or teleporting!
-                                ee_pos, ee_orn = p.getLinkState(env.robot_id, env.ee_link_index)[:2]
-                                obj_pos, obj_orn = p.getBasePositionAndOrientation(env.target_obj_id)
-                                inv_ee_pos, inv_ee_orn = p.invertTransform(ee_pos, ee_orn)
-                                rel_pos, rel_orn = p.multiplyTransforms(inv_ee_pos, inv_ee_orn, obj_pos, obj_orn)
+                    if step_in_stage >= 7 and grasp_constraint is None:
+                        contacts = env.check_contacts()
+                        if contacts > 0 or p.getDistance(env.robot_id, env.target_obj_id, 0.04)[0] < 0.03:
+                            # Preserve exact physical position at moment of grasp:
+                            # Calculate relative delta from EE link so object stays locked at EE + delta without snapping or teleporting!
+                            ee_pos, ee_orn = p.getLinkState(env.robot_id, env.ee_link_index)[:2]
+                            obj_pos, obj_orn = p.getBasePositionAndOrientation(env.target_obj_id)
+                            inv_ee_pos, inv_ee_orn = p.invertTransform(ee_pos, ee_orn)
+                            rel_pos, rel_orn = p.multiplyTransforms(inv_ee_pos, inv_ee_orn, obj_pos, obj_orn)
 
-                                grasp_constraint = p.createConstraint(
-                                    parentBodyUniqueId=env.robot_id,
-                                    parentLinkIndex=env.ee_link_index,
-                                    childBodyUniqueId=env.target_obj_id,
-                                    childLinkIndex=-1,
-                                    jointType=p.JOINT_FIXED,
-                                    jointAxis=[0, 0, 0],
-                                    parentFramePosition=rel_pos,
-                                    childFramePosition=[0, 0, 0],
-                                    parentFrameOrientation=rel_orn,
-                                    childFrameOrientation=[0, 0, 0, 1]
-                                )
+                            grasp_constraint = p.createConstraint(
+                                parentBodyUniqueId=env.robot_id,
+                                parentLinkIndex=env.ee_link_index,
+                                childBodyUniqueId=env.target_obj_id,
+                                childLinkIndex=-1,
+                                jointType=p.JOINT_FIXED,
+                                jointAxis=[0, 0, 0],
+                                parentFramePosition=rel_pos,
+                                childFramePosition=[0, 0, 0],
+                                parentFrameOrientation=rel_orn,
+                                childFrameOrientation=[0, 0, 0, 1]
+                            )
                 elif "lift" in st_lower:
                     # Lift arm to transit height (holding mug)
                     curr_j2 = float(0.85 * curr_j2 + 0.15 * 0.59)
