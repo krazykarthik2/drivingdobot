@@ -395,7 +395,7 @@ def run_pure_flow():
                     if "move" in st_lower and "mug" in st_lower:
                         q = "Is the robot gripper positioned near or above the coffee mug? Answer YES or NO."
                     elif "grasp" in st_lower:
-                        q = "Is the robot gripper touching or near the coffee mug? Answer YES or NO."
+                        q = "Is the robot gripper positioned near the mug? Answer YES or NO."
                     elif "lift" in st_lower:
                         q = "Is the coffee mug lifted off the table? Answer YES or NO."
                     elif "tray" in st_lower and "move" in st_lower:
