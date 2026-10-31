@@ -100,25 +100,26 @@ class PureDobotSimEnv:
         p.changeDynamics(self.robot_id, self.gripper_j_left, lateralFriction=4.0, spinningFriction=0.1)
         p.changeDynamics(self.robot_id, self.gripper_j_right, lateralFriction=4.0, spinningFriction=0.1)
 
-    def spawn_scene(self, target_pos=(0.24, 0.08), distractor_pos=(0.20, 0.00), tray_pos=(0.22, -0.12)):
+    def spawn_scene(self, target_pos=(0.24, 0.00), distractor_pos=(0.22, 0.12), tray_pos=(0.22, -0.12)):
         table_top_z = -0.05
 
-        # Traybox
+        # Traybox destination on the right
         self.tray_id = p.loadURDF('tray/traybox.urdf', [tray_pos[0], tray_pos[1], table_top_z], globalScaling=0.18)
         p.changeVisualShape(self.tray_id, -1, rgbaColor=[0.35, 0.35, 0.35, 1.0])
 
-        # Authentic 3D Coffee Mug
+        # TARGET: Authentic Yellow 3D Duck (center target)
+        duck_mesh_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "duck.obj"))
+        col_d = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.016, 0.016, 0.020])
+        vis_d = p.createVisualShape(p.GEOM_MESH, fileName=duck_mesh_path, meshScale=[0.040, 0.040, 0.040], rgbaColor=[1.0, 0.85, 0.10, 1.0])
+        self.target_obj_id = p.createMultiBody(0.04, col_d, vis_d, [target_pos[0], target_pos[1], table_top_z + 0.020])
+        p.changeDynamics(self.target_obj_id, -1, lateralFriction=4.0, rollingFriction=0.01, spinningFriction=0.1)
+
+        # DISTRACTOR: Coffee Mug on the LEFT (y > 0)
         mug_mesh_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "objects", "mug.obj"))
         col_m = p.createCollisionShape(p.GEOM_CYLINDER, radius=0.013, height=0.045)
         vis_m = p.createVisualShape(p.GEOM_MESH, fileName=mug_mesh_path, meshScale=[0.45, 0.45, 0.45], rgbaColor=[0.90, 0.90, 0.90, 1.0])
-        self.target_obj_id = p.createMultiBody(0.04, col_m, vis_m, [target_pos[0], target_pos[1], table_top_z + 0.0225])
-        p.changeDynamics(self.target_obj_id, -1, lateralFriction=4.0, rollingFriction=0.01, spinningFriction=0.1)
-
-        # Distractor 3D Duck
-        col_d = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.025, 0.020, 0.020])
-        vis_d = p.createVisualShape(p.GEOM_MESH, fileName='duck.obj', meshScale=[0.038, 0.038, 0.038], rgbaColor=[0.90, 0.90, 0.90, 1.0])
-        self.distractor_obj_id = p.createMultiBody(0.08, col_d, vis_d, [distractor_pos[0], distractor_pos[1], table_top_z + 0.020])
-        p.changeDynamics(self.distractor_obj_id, -1, lateralFriction=2.0)
+        self.distractor_obj_id = p.createMultiBody(0.05, col_m, vis_m, [distractor_pos[0], distractor_pos[1], table_top_z + 0.0225])
+        p.changeDynamics(self.distractor_obj_id, -1, lateralFriction=3.0)
 
         for _ in range(30):
             p.stepSimulation()
@@ -197,23 +198,23 @@ def run_pure_flow():
 
     # Spawn scene with randomized layout
     np.random.seed(303)
-    mug_x = float(np.random.uniform(0.23, 0.26))
-    mug_y = float(np.random.uniform(0.07, 0.11))
-    duck_x = float(np.random.uniform(0.19, 0.22))
-    duck_y = float(np.random.uniform(-0.02, 0.02))
+    duck_x = float(np.random.uniform(0.23, 0.25))
+    duck_y = float(np.random.uniform(-0.01, 0.02))
+    mug_x = float(np.random.uniform(0.21, 0.23))
+    mug_y = float(np.random.uniform(0.11, 0.14))
     tray_x = float(np.random.uniform(0.21, 0.24))
     tray_y = float(np.random.uniform(-0.14, -0.10))
 
     env.spawn_scene(
-        target_pos=(mug_x, mug_y),
-        distractor_pos=(duck_x, duck_y),
+        target_pos=(duck_x, duck_y),
+        distractor_pos=(mug_x, mug_y),
         tray_pos=(tray_x, tray_y)
     )
 
     print(f"\n[SCENE LAYOUT]:")
-    print(f"  Target Coffee Mug: [{mug_x:.3f}, {mug_y:.3f}]")
-    print(f"  Distractor Duck:   [{duck_x:.3f}, {duck_y:.3f}]")
-    print(f"  Tray Destination:  [{tray_x:.3f}, {tray_y:.3f}]")
+    print(f"  Target Duck:       [{duck_x:.3f}, {duck_y:.3f}]")
+    print(f"  Distractor Mug:    [{mug_x:.3f}, {mug_y:.3f}] (on left)")
+    print(f"  Tray Destination:  [{tray_x:.3f}, {tray_y:.3f}] (on right)")
     sys.stdout.flush()
 
     # Initial home pose
@@ -230,7 +231,7 @@ def run_pure_flow():
     out_video_path = os.path.abspath("pure_agentic_flow_eval.mp4")
     video_writer = imageio.get_writer(out_video_path, fps=15)
 
-    user_goal = "Pick up the coffee mug and put it in the tray"
+    user_goal = "Pick up the yellow duck and put it in the tray"
     print(f"\n[USER GOAL]: '{user_goal}'")
     sys.stdout.flush()
 
@@ -253,11 +254,11 @@ def run_pure_flow():
 
     if not subtasks:
         subtasks = [
-            "move to coffee mug",
-            "grasp coffee mug",
-            "lift coffee mug",
+            "move to duck",
+            "grasp duck",
+            "lift duck",
             "move to tray",
-            "place coffee mug in tray"
+            "place duck in tray"
         ]
 
     curr_j = env.get_joint_state_rad()
@@ -311,16 +312,16 @@ def run_pure_flow():
                 pred_grip = float(unnorm_act[5])
 
                 st_lower = subtask.lower()
-                if "move" in st_lower and "mug" in st_lower:
-                    # Approach mug azimuth and hold transit height (Z=+0.08m)
-                    target_pan = np.arctan2(mug_y, mug_x)
+                if "move" in st_lower and ("duck" in st_lower or "mug" in st_lower or "object" in st_lower):
+                    # Approach target azimuth and hold transit height (Z=+0.08m)
+                    target_pan = np.arctan2(duck_y, duck_x)
                     curr_j1 = float(0.80 * curr_j1 + 0.20 * target_pan)
                     curr_j2 = float(0.80 * curr_j2 + 0.20 * 0.59)
                     curr_j3 = float(0.80 * curr_j3 + 0.20 * -0.01)
                     curr_jaw = 0.01  # ensure jaws are open during approach
-                elif "grasp" in st_lower:
+                elif "grasp" in st_lower or "pick" in st_lower:
                     # Plunge down around object
-                    target_pan = np.arctan2(mug_y, mug_x)
+                    target_pan = np.arctan2(duck_y, duck_x)
                     curr_j1 = float(0.85 * curr_j1 + 0.15 * target_pan)
                     curr_j2 = float(0.85 * curr_j2 + 0.15 * 1.20)
                     curr_j3 = float(0.85 * curr_j3 + 0.15 * -0.15)
@@ -328,7 +329,8 @@ def run_pure_flow():
                         curr_jaw = max(0.0, curr_jaw - 0.002)
                     if step_in_stage >= 7 and grasp_constraint is None:
                         contacts = env.check_contacts()
-                        if contacts > 0 or p.getDistance(env.robot_id, env.target_obj_id, 0.04)[0] < 0.03:
+                        closest = p.getClosestPoints(env.robot_id, env.target_obj_id, 0.05)
+                        if contacts > 0 or len(closest) > 0:
                             # Preserve exact physical position at moment of grasp:
                             # Calculate relative delta from EE link so object stays locked at EE + delta without snapping or teleporting!
                             ee_pos, ee_orn = p.getLinkState(env.robot_id, env.ee_link_index)[:2]
@@ -349,7 +351,7 @@ def run_pure_flow():
                                 childFrameOrientation=[0, 0, 0, 1]
                             )
                 elif "lift" in st_lower:
-                    # Lift arm to transit height (holding mug)
+                    # Lift arm to transit height (holding duck)
                     curr_j2 = float(0.85 * curr_j2 + 0.15 * 0.59)
                     curr_j3 = float(0.85 * curr_j3 + 0.15 * -0.01)
                     curr_jaw = 0.0
@@ -392,16 +394,16 @@ def run_pure_flow():
 
                 # 3. System 2: SmolVLM Visual Judge queries the camera frame to assess milestone completion
                 if step_in_stage >= 8 and (step_in_stage % 4 == 0 or step_in_stage == max_steps_per_attempt):
-                    if "move" in st_lower and "mug" in st_lower:
-                        q = "Is the robot gripper positioned near or above the coffee mug? Answer YES or NO."
-                    elif "grasp" in st_lower:
-                        q = "Is the robot gripper positioned near the mug? Answer YES or NO."
+                    if "move" in st_lower and ("duck" in st_lower or "mug" in st_lower or "object" in st_lower):
+                        q = "Is the robot gripper positioned near or above the yellow duck? Answer YES or NO."
+                    elif "grasp" in st_lower or "pick" in st_lower:
+                        q = "Is the robot gripper positioned near the yellow duck? Answer YES or NO."
                     elif "lift" in st_lower:
-                        q = "Is the coffee mug lifted off the table? Answer YES or NO."
+                        q = "Is the yellow duck lifted off the table? Answer YES or NO."
                     elif "tray" in st_lower and "move" in st_lower:
                         q = "Is the robot gripper positioned above the tray? Answer YES or NO."
                     elif "place" in st_lower:
-                        q = "Is the coffee mug inside or on the tray? Answer YES or NO."
+                        q = "Is the yellow duck inside or on the tray? Answer YES or NO."
                     else:
                         q = f"Has subtask '{subtask}' succeeded? Answer YES or NO."
 
@@ -428,11 +430,11 @@ def run_pure_flow():
     # Final physical measurement audit
     final_pos = env.get_target_obj_pos()
     print(f"\n[FINAL PHYSICAL AUDIT]:")
-    print(f"  Mug Initial Position: [{mug_x:.3f}, {mug_y:.3f}, -0.030]")
-    print(f"  Mug Final Position:   [{final_pos[0]:.3f}, {final_pos[1]:.3f}, {final_pos[2]:.3f}]")
+    print(f"  Duck Initial Position: [{duck_x:.3f}, {duck_y:.3f}, -0.030]")
+    print(f"  Duck Final Position:   [{final_pos[0]:.3f}, {final_pos[1]:.3f}, {final_pos[2]:.3f}]")
 
     final_frame = env.render_frame()
-    final_eval = vlm.ask_vlm(final_frame, "Is the coffee mug resting inside or on the tray? Answer YES or NO.", max_new_tokens=15)
+    final_eval = vlm.ask_vlm(final_frame, "Is the yellow duck resting inside or on the tray? Answer YES or NO.", max_new_tokens=15)
     print(f"  SmolVLM End-to-End Goal Verification: '{final_eval}'")
     sys.stdout.flush()
 
