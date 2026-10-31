@@ -107,10 +107,10 @@ class PureDobotSimEnv:
         self.tray_id = p.loadURDF('tray/traybox.urdf', [tray_pos[0], tray_pos[1], table_top_z], globalScaling=0.18)
         p.changeVisualShape(self.tray_id, -1, rgbaColor=[0.35, 0.35, 0.35, 1.0])
 
-        # Graspable Coffee Canister / Mug Prism
-        # Parallel-jaw friendly geometry (halfExtents = 0.012m, width = 0.024m vs 0.027m jaw opening)
-        col_m = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.012, 0.012, 0.0225])
-        vis_m = p.createVisualShape(p.GEOM_BOX, halfExtents=[0.012, 0.012, 0.0225], rgbaColor=[0.85, 0.20, 0.20, 1.0])
+        # Authentic 3D Coffee Mug
+        mug_mesh_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "objects", "mug.obj"))
+        col_m = p.createCollisionShape(p.GEOM_CYLINDER, radius=0.013, height=0.045)
+        vis_m = p.createVisualShape(p.GEOM_MESH, fileName=mug_mesh_path, meshScale=[0.45, 0.45, 0.45], rgbaColor=[0.90, 0.90, 0.90, 1.0])
         self.target_obj_id = p.createMultiBody(0.04, col_m, vis_m, [target_pos[0], target_pos[1], table_top_z + 0.0225])
         p.changeDynamics(self.target_obj_id, -1, lateralFriction=4.0, rollingFriction=0.01, spinningFriction=0.1)
 
