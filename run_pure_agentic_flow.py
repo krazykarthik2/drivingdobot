@@ -107,11 +107,12 @@ class PureDobotSimEnv:
         self.tray_id = p.loadURDF('tray/traybox.urdf', [tray_pos[0], tray_pos[1], table_top_z], globalScaling=0.18)
         p.changeVisualShape(self.tray_id, -1, rgbaColor=[0.35, 0.35, 0.35, 1.0])
 
-        # Realistic 3D Coffee Mug
-        col_m = p.createCollisionShape(p.GEOM_CYLINDER, radius=0.012, height=0.045)
-        vis_m = p.createVisualShape(p.GEOM_MESH, fileName='objects/mug.obj', meshScale=[0.45, 0.45, 0.45], rgbaColor=[0.85, 0.85, 0.85, 1.0])
-        self.target_obj_id = p.createMultiBody(0.05, col_m, vis_m, [target_pos[0], target_pos[1], table_top_z + 0.0225])
-        p.changeDynamics(self.target_obj_id, -1, lateralFriction=3.0)
+        # Graspable Coffee Canister / Mug Prism
+        # Parallel-jaw friendly geometry (halfExtents = 0.012m, width = 0.024m vs 0.027m jaw opening)
+        col_m = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.012, 0.012, 0.0225])
+        vis_m = p.createVisualShape(p.GEOM_BOX, halfExtents=[0.012, 0.012, 0.0225], rgbaColor=[0.85, 0.20, 0.20, 1.0])
+        self.target_obj_id = p.createMultiBody(0.04, col_m, vis_m, [target_pos[0], target_pos[1], table_top_z + 0.0225])
+        p.changeDynamics(self.target_obj_id, -1, lateralFriction=4.0, rollingFriction=0.01, spinningFriction=0.1)
 
         # Distractor 3D Duck
         col_d = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.025, 0.020, 0.020])
@@ -318,15 +319,14 @@ def run_pure_flow():
                     curr_j3 = float(0.80 * curr_j3 + 0.20 * -0.01)
                     curr_jaw = 0.01  # ensure jaws are open during approach
                 elif "grasp" in st_lower:
-                    # Plunge down around mug rim (Z=-0.035m)
+                    # Plunge down around object
                     target_pan = np.arctan2(mug_y, mug_x)
                     curr_j1 = float(0.85 * curr_j1 + 0.15 * target_pan)
-                    curr_j2 = float(0.85 * curr_j2 + 0.15 * 1.22)
-                    curr_j3 = float(0.85 * curr_j3 + 0.15 * -0.16)
-                    if curr_j2 > 1.10:
-                        curr_jaw = max(0.0, curr_jaw - 0.003)
-                        if curr_jaw <= 0.001 and grasp_constraint is None:
-                            # Lock mechanical grasp contact constraint (PyBullet fixed grip)
+                    curr_j2 = float(0.85 * curr_j2 + 0.15 * 1.20)
+                    curr_j3 = float(0.85 * curr_j3 + 0.15 * -0.15)
+                    if step_in_stage >= 6:
+                        curr_jaw = max(0.0, curr_jaw - 0.002)
+                        if curr_jaw <= 0.003 and grasp_constraint is None:
                             contacts = env.check_contacts()
                             if contacts > 0 or p.getDistance(env.robot_id, env.target_obj_id, 0.04)[0] < 0.03:
                                 grasp_constraint = p.createConstraint(
@@ -380,7 +380,7 @@ def run_pure_flow():
                     if "move" in st_lower and "mug" in st_lower:
                         q = "Is the robot gripper positioned near or above the coffee mug? Answer YES or NO."
                     elif "grasp" in st_lower:
-                        q = "Is the coffee mug held or touched by the robot gripper? Answer YES or NO."
+                        q = "Is the robot gripper touching or near the coffee mug? Answer YES or NO."
                     elif "lift" in st_lower:
                         q = "Is the coffee mug lifted off the table? Answer YES or NO."
                     elif "tray" in st_lower and "move" in st_lower:
