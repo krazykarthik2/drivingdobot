@@ -143,18 +143,18 @@ def run_evaluation_experiment(mode="cot", out_video_path="eval_cot.mp4"):
     env.step_joint_action(0.0, 0.4, -0.2, 0.0, 0.01)
 
     video_writer = imageio.get_writer(out_video_path, fps=15)
-    user_goal = "Pick up the yellow duck and put it in the tray"
+    user_goal = "Pick up the duck and put it in the tray"
 
     initial_frame = env.render_frame()
     plan_raw = judge.plan_subtasks(initial_frame, user_goal)
     print(f"\n[{mode.upper()} Plan Generated]:\n{plan_raw}\n")
 
     subtasks = [
-        "move to yellow duck",
-        "grasp yellow duck",
-        "lift yellow duck",
+        "move to duck",
+        "grasp duck",
+        "lift duck",
         "move to tray",
-        "place yellow duck in tray"
+        "place duck in tray"
     ]
 
     curr_j = env.get_joint_state_rad()
@@ -246,15 +246,15 @@ def run_evaluation_experiment(mode="cot", out_video_path="eval_cot.mp4"):
 
                 if step_in_stage >= 8 and (step_in_stage % 4 == 0 or step_in_stage == 16):
                     if "move" in st_lower and ("duck" in st_lower or "target" in st_lower or "object" in st_lower):
-                        q = "Is the robot gripper positioned near or above the yellow duck? Answer YES or NO."
+                        q = "Is the robot gripper positioned near or above the duck? Answer YES or NO."
                     elif "grasp" in st_lower or "pick" in st_lower:
-                        q = "Is the robot gripper positioned near the yellow duck? Answer YES or NO."
+                        q = "Is the robot gripper positioned near the duck? Answer YES or NO."
                     elif "lift" in st_lower:
-                        q = "Is the yellow duck lifted off the table? Answer YES or NO."
+                        q = "Is the duck lifted off the table? Answer YES or NO."
                     elif "tray" in st_lower and "move" in st_lower:
                         q = "Is the robot gripper positioned above the tray? Answer YES or NO."
                     elif "place" in st_lower or "release" in st_lower:
-                        q = "Is the yellow duck inside or on the tray? Answer YES or NO."
+                        q = "Is the duck inside or on the tray? Answer YES or NO."
                     else:
                         q = f"Has subtask '{subtask}' succeeded? Answer YES or NO."
 
