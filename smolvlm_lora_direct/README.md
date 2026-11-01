@@ -1,9 +1,9 @@
 ---
-base_model: C:\Users\karthikkrazy\.cache\huggingface\hub\models--HuggingFaceTB--SmolVLM-256M-Instruct\snapshots\7e3e67edbbed1bf9888184d9df282b700a323964
+base_model: HuggingFaceTB/SmolVLM-256M-Instruct
 library_name: peft
 pipeline_tag: text-generation
 tags:
-- base_model:adapter:C:\Users\karthikkrazy\.cache\huggingface\hub\models--HuggingFaceTB--SmolVLM-256M-Instruct\snapshots\7e3e67edbbed1bf9888184d9df282b700a323964
+- base_model:adapter:HuggingFaceTB/SmolVLM-256M-Instruct
 - lora
 - transformers
 ---

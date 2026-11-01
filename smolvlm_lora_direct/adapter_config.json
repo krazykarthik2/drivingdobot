@@ -3,7 +3,7 @@
   "alpha_pattern": {},
   "arrow_config": null,
   "auto_mapping": null,
-  "base_model_name_or_path": "C:\\Users\\karthikkrazy\\.cache\\huggingface\\hub\\models--HuggingFaceTB--SmolVLM-256M-Instruct\\snapshots\\7e3e67edbbed1bf9888184d9df282b700a323964",
+  "base_model_name_or_path": "HuggingFaceTB/SmolVLM-256M-Instruct",
   "bias": "none",
   "corda_config": null,
   "ensure_weight_tying": false,
@@ -32,10 +32,10 @@
   "rank_pattern": {},
   "revision": null,
   "target_modules": [
-    "v_proj",
-    "k_proj",
+    "o_proj",
     "q_proj",
-    "o_proj"
+    "k_proj",
+    "v_proj"
   ],
   "target_parameters": null,
   "task_type": "CAUSAL_LM",
