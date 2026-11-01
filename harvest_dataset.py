@@ -11,7 +11,7 @@ import cv2
 import pybullet as p
 import pybullet_data
 
-class SimDataHarvester:
+class ProductionDataHarvester:
     def __init__(self, output_dir="harvested_dataset", render_width=384, render_height=384):
         self.output_dir = os.path.abspath(output_dir)
         self.img_dir = os.path.join(self.output_dir, "images")
@@ -24,30 +24,43 @@ class SimDataHarvester:
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         p.setGravity(0, 0, -9.81)
 
-        # 45-degree elevated camera
-        self.cam_target = [0.22, 0.0, -0.02]
-        self.cam_eye = [0.42, 0.0, 0.32]
-        self.cam_up = [0.0, 0.0, 1.0]
-        self.view_matrix = p.computeViewMatrix(self.cam_eye, self.cam_target, self.cam_up)
-        self.proj_matrix = p.computeProjectionMatrixFOV(45.0, 1.0, 0.05, 2.5)
-
         # Asset paths
         self.urdf_robot = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "dobot_magician_ros2", "ai_training", "env", "dobot_pybullet.urdf")
         )
         self.duck_mesh = os.path.abspath(os.path.join(os.path.dirname(__file__), "duck.obj"))
         self.bowl_mesh = os.path.abspath(os.path.join(os.path.dirname(__file__), "bowl.obj"))
+        self.mug_mesh = os.path.abspath(os.path.join(os.path.dirname(__file__), "objects", "mug.obj"))
 
         self.records = []
         self.frame_id = 0
 
-    def reset_world(self, target_type="duck", container_type="tray"):
+    def setup_camera(self):
+        # Apply camera jitter (+/- 2cm) and FOV variations (+/- 2 deg)
+        cam_target = [0.22 + np.random.uniform(-0.01, 0.01), 0.0, -0.02]
+        cam_eye = [
+            0.42 + np.random.uniform(-0.02, 0.02),
+            0.00 + np.random.uniform(-0.02, 0.02),
+            0.32 + np.random.uniform(-0.02, 0.02)
+        ]
+        cam_up = [0.0, 0.0, 1.0]
+        fov = float(np.random.uniform(43.0, 47.0))
+        self.view_matrix = p.computeViewMatrix(cam_eye, cam_target, cam_up)
+        self.proj_matrix = p.computeProjectionMatrixFOV(fov, 1.0, 0.05, 2.5)
+
+    def reset_world(self, target_type="duck", container_type="tray", table_style="wood"):
         p.resetSimulation()
         p.setGravity(0, 0, -9.81)
+        self.setup_camera()
 
-        # Table
+        # Multi-table textures (wood, dark gray, white)
+        table_colors = {
+            "wood": [0.75, 0.70, 0.65, 1.0],
+            "dark": [0.30, 0.30, 0.32, 1.0],
+            "white": [0.88, 0.88, 0.88, 1.0]
+        }
         col_t = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.5, 0.5, 0.02])
-        vis_t = p.createVisualShape(p.GEOM_BOX, halfExtents=[0.5, 0.5, 0.02], rgbaColor=[0.75, 0.70, 0.65, 1.0])
+        vis_t = p.createVisualShape(p.GEOM_BOX, halfExtents=[0.5, 0.5, 0.02], rgbaColor=table_colors[table_style])
         p.createMultiBody(0, col_t, vis_t, [0.20, 0.0, -0.07])
 
         # Robot
@@ -59,9 +72,9 @@ class SimDataHarvester:
 
         table_top_z = -0.05
 
-        # Container (tray or bowl) on right
-        cont_x = float(np.random.uniform(0.21, 0.24))
-        cont_y = float(np.random.uniform(-0.14, -0.10))
+        # Container on right
+        cont_x = float(np.random.uniform(0.21, 0.25))
+        cont_y = float(np.random.uniform(-0.15, -0.10))
         self.cont_pos = np.array([cont_x, cont_y, table_top_z])
         self.container_type = container_type
 
@@ -74,8 +87,8 @@ class SimDataHarvester:
             self.cont_id = p.createMultiBody(0, col_b, vis_b, [cont_x, cont_y, table_top_z + 0.0125])
 
         # Target (duck or cube) in center
-        targ_x = float(np.random.uniform(0.22, 0.25))
-        targ_y = float(np.random.uniform(-0.02, 0.02))
+        targ_x = float(np.random.uniform(0.21, 0.26))
+        targ_y = float(np.random.uniform(-0.03, 0.03))
         self.targ_pos = np.array([targ_x, targ_y, table_top_z + 0.020])
         self.target_type = target_type
 
@@ -83,23 +96,22 @@ class SimDataHarvester:
             col_d = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.016, 0.016, 0.020])
             vis_d = p.createVisualShape(p.GEOM_MESH, fileName=self.duck_mesh, meshScale=[0.040, 0.040, 0.040], rgbaColor=[1.0, 0.85, 0.10, 1.0])
             self.target_id = p.createMultiBody(0.04, col_d, vis_d, self.targ_pos)
-        else: # cube (red or green)
+        else: # cube
             col_c = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.015, 0.015, 0.015])
-            vis_c = p.createVisualShape(p.GEOM_BOX, halfExtents=[0.015, 0.015, 0.015], rgbaColor=[0.9, 0.2, 0.2, 1.0])
+            vis_c = p.createVisualShape(p.GEOM_BOX, halfExtents=[0.015, 0.015, 0.015], rgbaColor=[0.85, 0.2, 0.2, 1.0])
             self.target_id = p.createMultiBody(0.04, col_c, vis_c, self.targ_pos)
 
-        # Distractor (e.g. coffee mug on left)
-        mug_mesh_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "objects", "mug.obj"))
+        # Distractor (coffee mug) on left
         col_m = p.createCollisionShape(p.GEOM_CYLINDER, radius=0.013, height=0.045)
-        vis_m = p.createVisualShape(p.GEOM_MESH, fileName=mug_mesh_path, meshScale=[0.45, 0.45, 0.45], rgbaColor=[0.9, 0.9, 0.9, 1.0])
-        dist_x = float(np.random.uniform(0.21, 0.24))
-        dist_y = float(np.random.uniform(0.10, 0.14))
+        vis_m = p.createVisualShape(p.GEOM_MESH, fileName=self.mug_mesh, meshScale=[0.45, 0.45, 0.45], rgbaColor=[0.9, 0.9, 0.9, 1.0])
+        dist_x = float(np.random.uniform(0.20, 0.24))
+        dist_y = float(np.random.uniform(0.10, 0.15))
         self.dist_pos = np.array([dist_x, dist_y, table_top_z + 0.0225])
         self.dist_id = p.createMultiBody(0.05, col_m, vis_m, self.dist_pos)
 
         p.changeDynamics(self.target_id, -1, lateralFriction=4.0)
 
-        for _ in range(25):
+        for _ in range(20):
             p.stepSimulation()
 
     def set_robot_joints(self, j1, j2, j3, jaw):
@@ -116,9 +128,13 @@ class SimDataHarvester:
             p.resetJointState(self.robot_id, 5, -j3)
 
     def capture_image(self):
+        # Random light direction variations
+        lx = float(np.random.uniform(0.8, 1.2))
+        ly = float(np.random.uniform(0.3, 0.7))
+        lz = float(np.random.uniform(1.8, 2.2))
         _, _, rgb, _, _ = p.getCameraImage(
             self.width, self.height, self.view_matrix, self.proj_matrix,
-            lightDirection=[1.0, 0.5, 2.0], lightColor=[1.0, 1.0, 1.0], lightDistance=2.0,
+            lightDirection=[lx, ly, lz], lightColor=[1.0, 1.0, 1.0], lightDistance=2.0,
             shadow=1, renderer=p.ER_TINY_RENDERER
         )
         return rgb[:, :, :3].copy()
@@ -126,20 +142,22 @@ class SimDataHarvester:
     def harvest_episode(self, ep_idx):
         t_type = "duck" if ep_idx % 2 == 0 else "cube"
         c_type = "tray" if (ep_idx // 2) % 2 == 0 else "bowl"
-        self.reset_world(target_type=t_type, container_type=c_type)
+        t_style = ["wood", "dark", "white"][ep_idx % 3]
+        self.reset_world(target_type=t_type, container_type=c_type, table_style=t_style)
 
-        target_name = "yellow duck" if t_type == "duck" else "red cube"
+        target_name = "duck" if t_type == "duck" else "cube"
         cont_name = "tray" if c_type == "tray" else "bowl"
         user_goal = f"Pick up the {target_name} and put it in the {cont_name}"
 
-        # 1. INITIAL SCENE (Decomposition & Home Pose Verification)
+        # -------------------------------------------------------------
+        # 1. INITIAL SCENE: Task Planning & Spatial VQA Regularization
+        # -------------------------------------------------------------
         img = self.capture_image()
         img_fn = f"frame_{self.frame_id:05d}.jpg"
         cv2.imwrite(os.path.join(self.img_dir, img_fn), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
         self.frame_id += 1
 
-        # Ground truth observation
-        obs_plan = f"I see a {target_name} in the center, a white mug on the left, and a {cont_name} on the right. Gripper is at home pose."
+        obs_plan = f"I see a {target_name} in the center, a mug on the left, and a {cont_name} on the right. Gripper is at home pose."
         plan_direct = f"1. move to {target_name}\n2. grasp {target_name}\n3. lift {target_name}\n4. move to {cont_name}\n5. place {target_name} in {cont_name}"
         plan_cot = f"<thought>{obs_plan}</thought>\n<plan>\n{plan_direct}\n</plan>"
 
@@ -151,41 +169,74 @@ class SimDataHarvester:
             "direct_response": plan_direct
         })
 
-        # 2. SIMULATE APPROACH STAGE
+        # Auxiliary Spatial VQA Sample (10% partition)
+        self.records.append({
+            "image": img_fn,
+            "task_type": "spatial_vqa",
+            "instruction": f"Where is the {target_name} located?",
+            "cot_response": f"<thought>The {target_name} is situated in the central work area on the table.</thought>\n<answer>center of table</answer>",
+            "direct_response": "center of table"
+        })
+
+        # -------------------------------------------------------------
+        # 2. HARD NEGATIVE: Near-Miss Approach (Wrong azimuth / distractor)
+        # -------------------------------------------------------------
+        dist_pan = np.arctan2(self.dist_pos[1], self.dist_pos[0])
+        self.set_robot_joints(dist_pan, 0.59, -0.01, 0.01) # over distractor mug
+        img_neg1 = self.capture_image()
+        img_fn_neg1 = f"frame_{self.frame_id:05d}.jpg"
+        cv2.imwrite(os.path.join(self.img_dir, img_fn_neg1), cv2.cvtColor(img_neg1, cv2.COLOR_RGB2BGR))
+        self.frame_id += 1
+
+        self.records.append({
+            "image": img_fn_neg1,
+            "task_type": "hard_negative",
+            "instruction": f"Is the robot gripper positioned near or above the {target_name}? Answer YES or NO.",
+            "cot_response": f"<thought>The gripper is hovering above the mug on the left, not the {target_name}.</thought>\n<decision>NO</decision>",
+            "direct_response": "NO"
+        })
+
+        # -------------------------------------------------------------
+        # 3. POSITIVE: Approach Target
+        # -------------------------------------------------------------
         targ_pan = np.arctan2(self.targ_pos[1], self.targ_pos[0])
-        self.set_robot_joints(targ_pan, 0.59, -0.01, 0.01) # above target
+        self.set_robot_joints(targ_pan, 0.59, -0.01, 0.01) # correctly above target
         img = self.capture_image()
         img_fn = f"frame_{self.frame_id:05d}.jpg"
         cv2.imwrite(os.path.join(self.img_dir, img_fn), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
         self.frame_id += 1
 
-        # Stage 1 positive gate
-        q1 = f"Is the robot gripper positioned near or above the {target_name}? Answer YES or NO."
         self.records.append({
             "image": img_fn,
-            "task_type": "stage_gate",
-            "instruction": q1,
+            "task_type": "positive_gate",
+            "instruction": f"Is the robot gripper positioned near or above the {target_name}? Answer YES or NO.",
             "cot_response": f"<thought>Gripper is positioned directly over the {target_name}.</thought>\n<decision>YES</decision>",
             "direct_response": "YES"
         })
 
-        # Negative gate check on destination
-        q4 = f"Is the robot gripper positioned above the {cont_name}? Answer YES or NO."
+        # -------------------------------------------------------------
+        # 4. HARD NEGATIVE: Near-Miss Grasp (Jaws closed in empty air)
+        # -------------------------------------------------------------
+        self.set_robot_joints(targ_pan + 0.12, 1.20, -0.15, 0.00) # plunge 3cm away and close
+        img_neg2 = self.capture_image()
+        img_fn_neg2 = f"frame_{self.frame_id:05d}.jpg"
+        cv2.imwrite(os.path.join(self.img_dir, img_fn_neg2), cv2.cvtColor(img_neg2, cv2.COLOR_RGB2BGR))
+        self.frame_id += 1
+
         self.records.append({
-            "image": img_fn,
-            "task_type": "stage_gate",
-            "instruction": q4,
-            "cot_response": f"<thought>Gripper is over the {target_name}, not above the {cont_name}.</thought>\n<decision>NO</decision>",
+            "image": img_fn_neg2,
+            "task_type": "hard_negative",
+            "instruction": f"Is the robot gripper positioned near the {target_name}? Answer YES or NO.",
+            "cot_response": f"<thought>The gripper clamped empty air beside the {target_name}.</thought>\n<decision>NO</decision>",
             "direct_response": "NO"
         })
 
-        # 3. SIMULATE GRASP STAGE
-        self.set_robot_joints(targ_pan, 1.20, -0.15, 0.00) # plunge down & close jaws
-        ee_pos = p.getLinkState(self.robot_id, 6)[0]
-        obj_pos = p.getBasePositionAndOrientation(self.target_id)[0]
+        # -------------------------------------------------------------
+        # 5. POSITIVE: Authentic Grasp
+        # -------------------------------------------------------------
+        self.set_robot_joints(targ_pan, 1.20, -0.15, 0.00)
         inv_ee = p.invertTransform(*p.getLinkState(self.robot_id, 6)[:2])
         rel_pos, rel_orn = p.multiplyTransforms(inv_ee[0], inv_ee[1], *p.getBasePositionAndOrientation(self.target_id))
-        
         cid = p.createConstraint(self.robot_id, 6, self.target_id, -1, p.JOINT_FIXED, [0,0,0], rel_pos, [0,0,0], rel_orn, [0,0,0,1])
 
         img = self.capture_image()
@@ -193,36 +244,38 @@ class SimDataHarvester:
         cv2.imwrite(os.path.join(self.img_dir, img_fn), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
         self.frame_id += 1
 
-        q2 = f"Is the robot gripper positioned near the {target_name}? Answer YES or NO."
         self.records.append({
             "image": img_fn,
-            "task_type": "stage_gate",
-            "instruction": q2,
-            "cot_response": f"<thought>Gripper jaws are clamped firmly around the {target_name}.</thought>\n<decision>YES</decision>",
+            "task_type": "positive_gate",
+            "instruction": f"Is the robot gripper positioned near the {target_name}? Answer YES or NO.",
+            "cot_response": f"<thought>Gripper jaws are firmly closed around the {target_name}.</thought>\n<decision>YES</decision>",
             "direct_response": "YES"
         })
 
-        # 4. SIMULATE LIFT STAGE
-        self.set_robot_joints(targ_pan, 0.59, -0.01, 0.00) # lift
-        for _ in range(10): p.stepSimulation()
+        # -------------------------------------------------------------
+        # 6. POSITIVE: Lift Object
+        # -------------------------------------------------------------
+        self.set_robot_joints(targ_pan, 0.59, -0.01, 0.00)
+        for _ in range(8): p.stepSimulation()
         img = self.capture_image()
         img_fn = f"frame_{self.frame_id:05d}.jpg"
         cv2.imwrite(os.path.join(self.img_dir, img_fn), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
         self.frame_id += 1
 
-        q3 = f"Is the {target_name} lifted off the table? Answer YES or NO."
         self.records.append({
             "image": img_fn,
-            "task_type": "stage_gate",
-            "instruction": q3,
-            "cot_response": f"<thought>The {target_name} is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+            "task_type": "positive_gate",
+            "instruction": f"Is the {target_name} lifted off the table? Answer YES or NO.",
+            "cot_response": f"<thought>The {target_name} is elevated and completely clear of the table.</thought>\n<decision>YES</decision>",
             "direct_response": "YES"
         })
 
-        # 5. SIMULATE TRANSIT TO CONTAINER
+        # -------------------------------------------------------------
+        # 7. POSITIVE: Transit to Container
+        # -------------------------------------------------------------
         cont_pan = np.arctan2(self.cont_pos[1], self.cont_pos[0])
-        self.set_robot_joints(cont_pan, 0.59, -0.01, 0.00) # above container
-        for _ in range(10): p.stepSimulation()
+        self.set_robot_joints(cont_pan, 0.59, -0.01, 0.00)
+        for _ in range(8): p.stepSimulation()
         img = self.capture_image()
         img_fn = f"frame_{self.frame_id:05d}.jpg"
         cv2.imwrite(os.path.join(self.img_dir, img_fn), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
@@ -230,19 +283,30 @@ class SimDataHarvester:
 
         self.records.append({
             "image": img_fn,
-            "task_type": "stage_gate",
-            "instruction": q4,
-            "cot_response": f"<thought>Gripper and held {target_name} are centered directly above the {cont_name}.</thought>\n<decision>YES</decision>",
+            "task_type": "positive_gate",
+            "instruction": f"Is the robot gripper positioned above the {cont_name}? Answer YES or NO.",
+            "cot_response": f"<thought>Gripper holding the {target_name} is centered directly above the {cont_name}.</thought>\n<decision>YES</decision>",
             "direct_response": "YES"
         })
 
-        # 6. SIMULATE RELEASE INTO CONTAINER
-        self.set_robot_joints(cont_pan, 1.20, -0.15, 0.01) # lower and open
+        # -------------------------------------------------------------
+        # 8. HARD NEGATIVE: Premature Release Check (Held above, not placed)
+        # -------------------------------------------------------------
+        self.records.append({
+            "image": img_fn,
+            "task_type": "hard_negative",
+            "instruction": f"Is the {target_name} inside or on the {cont_name}? Answer YES or NO.",
+            "cot_response": f"<thought>The {target_name} is still held in the gripper high above the {cont_name}, not yet placed.</thought>\n<decision>NO</decision>",
+            "direct_response": "NO"
+        })
+
+        # -------------------------------------------------------------
+        # 9. POSITIVE: Release & Settle in Container
+        # -------------------------------------------------------------
+        self.set_robot_joints(cont_pan, 1.20, -0.15, 0.01) # lower and release
         p.removeConstraint(cid)
         for _ in range(25): p.stepSimulation()
-        
-        # Withdraw gripper slightly up so object in container is unobstructed
-        self.set_robot_joints(cont_pan, 0.85, -0.08, 0.01)
+        self.set_robot_joints(cont_pan, 0.85, -0.08, 0.01) # withdraw gripper
         for _ in range(15): p.stepSimulation()
 
         img = self.capture_image()
@@ -250,29 +314,29 @@ class SimDataHarvester:
         cv2.imwrite(os.path.join(self.img_dir, img_fn), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
         self.frame_id += 1
 
-        q5 = f"Is the {target_name} inside or on the {cont_name}? Answer YES or NO."
         self.records.append({
             "image": img_fn,
-            "task_type": "stage_gate",
-            "instruction": q5,
+            "task_type": "positive_gate",
+            "instruction": f"Is the {target_name} inside or on the {cont_name}? Answer YES or NO.",
             "cot_response": f"<thought>The {target_name} is resting settled inside the {cont_name} basin.</thought>\n<decision>YES</decision>",
             "direct_response": "YES"
         })
 
-    def run_harvest(self, num_episodes=20):
-        print(f"[SimDataHarvester] Starting automated rollout for {num_episodes} episodes...")
+    def run_harvest(self, num_episodes=150):
+        print(f"[ProductionDataHarvester] Harvesting production mix across {num_episodes} episodes...")
         for ep in range(num_episodes):
             self.harvest_episode(ep)
-            print(f"  Episode {ep+1}/{num_episodes} completed. Total frames collected: {self.frame_id}")
-            sys.stdout.flush()
+            if (ep + 1) % 25 == 0:
+                print(f"  Progress: {ep+1}/{num_episodes} episodes | Total Samples: {len(self.records)}")
+                sys.stdout.flush()
 
         ann_path = os.path.join(self.output_dir, "dataset_annotations.json")
         with open(ann_path, "w") as f:
             json.dump(self.records, f, indent=2)
 
-        print(f"[SimDataHarvester] Finished! Saved {len(self.records)} samples to {ann_path}")
+        print(f"[ProductionDataHarvester] Complete! Generated {len(self.records)} balanced samples at {ann_path}")
         p.disconnect()
 
 if __name__ == "__main__":
-    harvester = SimDataHarvester()
-    harvester.run_harvest(num_episodes=20)
+    harvester = ProductionDataHarvester()
+    harvester.run_harvest(num_episodes=150)
