@@ -3,7 +3,7 @@ import modal
 
 app = modal.App("smolvlm-robot-lora-tuning")
 
-# Define lightweight container image with GPU support
+# Container image with PyTorch GPU, PEFT, and Transformers, plus local harvested dataset
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install(
@@ -15,17 +15,21 @@ image = (
         "pillow",
         "opencv-python-headless"
     )
+    .add_local_dir(
+        local_path=os.path.abspath("harvested_dataset"),
+        remote_path="/root/harvested_dataset"
+    )
 )
 
-# Persistent volume to store trained LoRA adapter weights
+# Modal Volume to persist trained adapters
 volume = modal.Volume.from_name("smolvlm-adapters-vol", create_if_missing=True)
 
 
 @app.function(
     image=image,
-    gpu="T4", # Or "A10G" / "L4"
+    gpu="T4",  # Lowest cost hardware on Modal (~$0.59/hr, ~0.02 USD total cost)
     volumes={"/adapters": volume},
-    timeout=1800
+    timeout=600
 )
 def train_smolvlm_modal(mode: str = "cot", epochs: int = 5, lr: float = 2e-4):
     """
@@ -35,18 +39,24 @@ def train_smolvlm_modal(mode: str = "cot", epochs: int = 5, lr: float = 2e-4):
     import torch
     from PIL import Image
     from torch.utils.data import Dataset, DataLoader
-    from transformers import AutoProcessor, AutoModelForVision2Seq
+    try:
+        from transformers import AutoModelForImageTextToText as VisionModelClass
+    except ImportError:
+        from transformers import AutoModelForVision2Seq as VisionModelClass
+    from transformers import AutoProcessor
     from peft import LoraConfig, get_peft_model
 
-    print(f"=== Running SmolVLM LoRA Fine-Tuning | Mode: {mode.upper()} ===")
+    print(f"\n=======================================================")
+    print(f"=== Fine-Tuning SmolVLM on Modal GPU | Mode: {mode.upper()} ===")
+    print(f"=======================================================")
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Device: {device} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'})")
 
     model_id = "HuggingFaceTB/SmolVLM-256M-Instruct"
     processor = AutoProcessor.from_pretrained(model_id)
-    model = AutoModelForVision2Seq.from_pretrained(
+    model = VisionModelClass.from_pretrained(
         model_id,
-        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32
+        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
     )
 
     lora_config = LoraConfig(
@@ -64,8 +74,11 @@ def train_smolvlm_modal(mode: str = "cot", epochs: int = 5, lr: float = 2e-4):
     model.print_trainable_parameters()
 
     # Load harvested dataset
-    with open("harvested_dataset/dataset_annotations.json", "r") as f:
+    ann_file = "/root/harvested_dataset/dataset_annotations.json"
+    img_dir = "/root/harvested_dataset/images"
+    with open(ann_file, "r") as f:
         samples = json.load(f)
+    print(f"Loaded {len(samples)} training samples from {ann_file}")
 
     class FastDataset(Dataset):
         def __init__(self, data):
@@ -74,7 +87,7 @@ def train_smolvlm_modal(mode: str = "cot", epochs: int = 5, lr: float = 2e-4):
             return len(self.data)
         def __getitem__(self, idx):
             item = self.data[idx]
-            img = Image.open(os.path.join("harvested_dataset/images", item["image"])).convert("RGB")
+            img = Image.open(os.path.join(img_dir, item["image"])).convert("RGB")
             target_text = item["cot_response"] if mode == "cot" else item["direct_response"]
             
             messages = [
@@ -105,35 +118,66 @@ def train_smolvlm_modal(mode: str = "cot", epochs: int = 5, lr: float = 2e-4):
             "attention_mask": (input_ids != 0).long()
         }
 
-    loader = DataLoader(FastDataset(samples), batch_size=4, shuffle=True, collate_fn=collate)
+    loader = DataLoader(FastDataset(samples), batch_size=1, shuffle=True, collate_fn=collate)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    grad_accum_steps = 4
 
     for epoch in range(epochs):
         ep_loss = 0.0
+        optimizer.zero_grad()
         for step, batch in enumerate(loader):
             b = {k: v.to(device) for k, v in batch.items()}
-            optimizer.zero_grad()
             out = model(**b)
-            loss = out.loss
+            loss = out.loss / grad_accum_steps
             loss.backward()
-            optimizer.step()
-            ep_loss += loss.item()
+            ep_loss += (loss.item() * grad_accum_steps)
+            
+            if (step + 1) % grad_accum_steps == 0 or (step + 1) == len(loader):
+                optimizer.step()
+                optimizer.zero_grad()
+                torch.cuda.empty_cache()
+
         avg = ep_loss / len(loader)
-        print(f"Epoch {epoch+1}/{epochs} | Average Loss: {avg:.4f}")
+        print(f"Epoch {epoch+1}/{epochs} | Average Training Loss: {avg:.4f}")
+        # Save checkpoint after each epoch so intermediate progress is never lost
+        ep_dir = f"/adapters/smolvlm_lora_{mode}"
+        model.save_pretrained(ep_dir)
+        processor.save_pretrained(ep_dir)
+        volume.commit()
 
     out_path = f"/adapters/smolvlm_lora_{mode}"
     model.save_pretrained(out_path)
     processor.save_pretrained(out_path)
     volume.commit()
     print(f"Model saved and committed to Modal Volume: {out_path}")
-    return f"Done: {out_path}"
+    return f"Success: {out_path} (Final Loss: {avg:.4f})"
 
 
 @app.local_entrypoint()
-def main():
-    print("Launching Dual LoRA Fine-Tuning on Modal GPU...")
-    print("1. Training Short CoT Adapter...")
-    res_cot = train_smolvlm_modal.remote(mode="cot", epochs=5)
-    print("2. Training Direct Tokens Adapter...")
-    res_dir = train_smolvlm_modal.remote(mode="direct", epochs=5)
-    print(f"\nAll complete!\nCoT: {res_cot}\nDirect: {res_dir}")
+def main(mode: str = "both"):
+    """
+    Train SmolVLM LoRA adapters on Modal GPU.
+    Usage:
+      modal run modal_train_smolvlm.py --mode cot
+      modal run modal_train_smolvlm.py --mode direct
+      modal run modal_train_smolvlm.py --mode both
+    """
+    print("=================================================================")
+    print(f"SMOLVLM LORA TRAINING ON MODAL GPU (TESLA T4) | MODE: {mode.upper()}")
+    print("=================================================================")
+
+    if mode in ["cot", "both"]:
+        print("\n>>> Launching Short CoT Adapter Fine-Tuning (smolvlm_lora_cot)...")
+        res_cot = train_smolvlm_modal.remote(mode="cot", epochs=5)
+        print(f"Result Short CoT: {res_cot}")
+
+    if mode in ["direct", "both"]:
+        print("\n>>> Launching Direct Structured Tokens Adapter (smolvlm_lora_direct)...")
+        res_dir = train_smolvlm_modal.remote(mode="direct", epochs=4)
+        print(f"Result Direct Tokens: {res_dir}")
+
+    print("\n=================================================================")
+    print("ALL FINISHED! Adapters saved to Modal persistent volume:")
+    print("  - /adapters/smolvlm_lora_cot")
+    print("  - /adapters/smolvlm_lora_direct")
+    print("=================================================================")
