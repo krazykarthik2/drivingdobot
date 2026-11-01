@@ -1,0 +1,982 @@
+[
+  {
+    "image": "frame_00000.jpg",
+    "task_type": "planning",
+    "instruction": "Goal: 'Pick up the duck and put it in the tray'. Break into robotic subtasks.",
+    "cot_response": "<thought>I see a duck in the center, a white mug on the left, and a tray on the right. Gripper is at home pose.</thought>\n<plan>\n1. move to duck\n2. grasp duck\n3. lift duck\n4. move to tray\n5. place duck in tray\n</plan>",
+    "direct_response": "1. move to duck\n2. grasp duck\n3. lift duck\n4. move to tray\n5. place duck in tray"
+  },
+  {
+    "image": "frame_00001.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near or above the duck? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is positioned directly over the duck.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00001.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the tray? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is over the duck, not above the tray.</thought>\n<decision>NO</decision>",
+    "direct_response": "NO"
+  },
+  {
+    "image": "frame_00002.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near the duck? Answer YES or NO.",
+    "cot_response": "<thought>Gripper jaws are clamped firmly around the duck.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00003.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the duck lifted off the table? Answer YES or NO.",
+    "cot_response": "<thought>The duck is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00004.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the tray? Answer YES or NO.",
+    "cot_response": "<thought>Gripper and held duck are centered directly above the tray.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00005.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the duck inside or on the tray? Answer YES or NO.",
+    "cot_response": "<thought>The duck is resting settled inside the tray basin.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00006.jpg",
+    "task_type": "planning",
+    "instruction": "Goal: 'Pick up the red cube and put it in the tray'. Break into robotic subtasks.",
+    "cot_response": "<thought>I see a red cube in the center, a white mug on the left, and a tray on the right. Gripper is at home pose.</thought>\n<plan>\n1. move to red cube\n2. grasp red cube\n3. lift red cube\n4. move to tray\n5. place red cube in tray\n</plan>",
+    "direct_response": "1. move to red cube\n2. grasp red cube\n3. lift red cube\n4. move to tray\n5. place red cube in tray"
+  },
+  {
+    "image": "frame_00007.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near or above the red cube? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is positioned directly over the red cube.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00007.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the tray? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is over the red cube, not above the tray.</thought>\n<decision>NO</decision>",
+    "direct_response": "NO"
+  },
+  {
+    "image": "frame_00008.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near the red cube? Answer YES or NO.",
+    "cot_response": "<thought>Gripper jaws are clamped firmly around the red cube.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00009.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the red cube lifted off the table? Answer YES or NO.",
+    "cot_response": "<thought>The red cube is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00010.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the tray? Answer YES or NO.",
+    "cot_response": "<thought>Gripper and held red cube are centered directly above the tray.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00011.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the red cube inside or on the tray? Answer YES or NO.",
+    "cot_response": "<thought>The red cube is resting settled inside the tray basin.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00012.jpg",
+    "task_type": "planning",
+    "instruction": "Goal: 'Pick up the duck and put it in the bowl'. Break into robotic subtasks.",
+    "cot_response": "<thought>I see a duck in the center, a white mug on the left, and a bowl on the right. Gripper is at home pose.</thought>\n<plan>\n1. move to duck\n2. grasp duck\n3. lift duck\n4. move to bowl\n5. place duck in bowl\n</plan>",
+    "direct_response": "1. move to duck\n2. grasp duck\n3. lift duck\n4. move to bowl\n5. place duck in bowl"
+  },
+  {
+    "image": "frame_00013.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near or above the duck? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is positioned directly over the duck.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00013.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the bowl? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is over the duck, not above the bowl.</thought>\n<decision>NO</decision>",
+    "direct_response": "NO"
+  },
+  {
+    "image": "frame_00014.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near the duck? Answer YES or NO.",
+    "cot_response": "<thought>Gripper jaws are clamped firmly around the duck.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00015.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the duck lifted off the table? Answer YES or NO.",
+    "cot_response": "<thought>The duck is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00016.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the bowl? Answer YES or NO.",
+    "cot_response": "<thought>Gripper and held duck are centered directly above the bowl.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00017.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the duck inside or on the bowl? Answer YES or NO.",
+    "cot_response": "<thought>The duck is resting settled inside the bowl basin.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00018.jpg",
+    "task_type": "planning",
+    "instruction": "Goal: 'Pick up the red cube and put it in the bowl'. Break into robotic subtasks.",
+    "cot_response": "<thought>I see a red cube in the center, a white mug on the left, and a bowl on the right. Gripper is at home pose.</thought>\n<plan>\n1. move to red cube\n2. grasp red cube\n3. lift red cube\n4. move to bowl\n5. place red cube in bowl\n</plan>",
+    "direct_response": "1. move to red cube\n2. grasp red cube\n3. lift red cube\n4. move to bowl\n5. place red cube in bowl"
+  },
+  {
+    "image": "frame_00019.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near or above the red cube? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is positioned directly over the red cube.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00019.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the bowl? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is over the red cube, not above the bowl.</thought>\n<decision>NO</decision>",
+    "direct_response": "NO"
+  },
+  {
+    "image": "frame_00020.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near the red cube? Answer YES or NO.",
+    "cot_response": "<thought>Gripper jaws are clamped firmly around the red cube.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00021.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the red cube lifted off the table? Answer YES or NO.",
+    "cot_response": "<thought>The red cube is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00022.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the bowl? Answer YES or NO.",
+    "cot_response": "<thought>Gripper and held red cube are centered directly above the bowl.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00023.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the red cube inside or on the bowl? Answer YES or NO.",
+    "cot_response": "<thought>The red cube is resting settled inside the bowl basin.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00024.jpg",
+    "task_type": "planning",
+    "instruction": "Goal: 'Pick up the duck and put it in the tray'. Break into robotic subtasks.",
+    "cot_response": "<thought>I see a duck in the center, a white mug on the left, and a tray on the right. Gripper is at home pose.</thought>\n<plan>\n1. move to duck\n2. grasp duck\n3. lift duck\n4. move to tray\n5. place duck in tray\n</plan>",
+    "direct_response": "1. move to duck\n2. grasp duck\n3. lift duck\n4. move to tray\n5. place duck in tray"
+  },
+  {
+    "image": "frame_00025.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near or above the duck? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is positioned directly over the duck.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00025.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the tray? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is over the duck, not above the tray.</thought>\n<decision>NO</decision>",
+    "direct_response": "NO"
+  },
+  {
+    "image": "frame_00026.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near the duck? Answer YES or NO.",
+    "cot_response": "<thought>Gripper jaws are clamped firmly around the duck.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00027.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the duck lifted off the table? Answer YES or NO.",
+    "cot_response": "<thought>The duck is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00028.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the tray? Answer YES or NO.",
+    "cot_response": "<thought>Gripper and held duck are centered directly above the tray.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00029.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the duck inside or on the tray? Answer YES or NO.",
+    "cot_response": "<thought>The duck is resting settled inside the tray basin.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00030.jpg",
+    "task_type": "planning",
+    "instruction": "Goal: 'Pick up the red cube and put it in the tray'. Break into robotic subtasks.",
+    "cot_response": "<thought>I see a red cube in the center, a white mug on the left, and a tray on the right. Gripper is at home pose.</thought>\n<plan>\n1. move to red cube\n2. grasp red cube\n3. lift red cube\n4. move to tray\n5. place red cube in tray\n</plan>",
+    "direct_response": "1. move to red cube\n2. grasp red cube\n3. lift red cube\n4. move to tray\n5. place red cube in tray"
+  },
+  {
+    "image": "frame_00031.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near or above the red cube? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is positioned directly over the red cube.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00031.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the tray? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is over the red cube, not above the tray.</thought>\n<decision>NO</decision>",
+    "direct_response": "NO"
+  },
+  {
+    "image": "frame_00032.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near the red cube? Answer YES or NO.",
+    "cot_response": "<thought>Gripper jaws are clamped firmly around the red cube.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00033.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the red cube lifted off the table? Answer YES or NO.",
+    "cot_response": "<thought>The red cube is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00034.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the tray? Answer YES or NO.",
+    "cot_response": "<thought>Gripper and held red cube are centered directly above the tray.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00035.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the red cube inside or on the tray? Answer YES or NO.",
+    "cot_response": "<thought>The red cube is resting settled inside the tray basin.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00036.jpg",
+    "task_type": "planning",
+    "instruction": "Goal: 'Pick up the duck and put it in the bowl'. Break into robotic subtasks.",
+    "cot_response": "<thought>I see a duck in the center, a white mug on the left, and a bowl on the right. Gripper is at home pose.</thought>\n<plan>\n1. move to duck\n2. grasp duck\n3. lift duck\n4. move to bowl\n5. place duck in bowl\n</plan>",
+    "direct_response": "1. move to duck\n2. grasp duck\n3. lift duck\n4. move to bowl\n5. place duck in bowl"
+  },
+  {
+    "image": "frame_00037.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near or above the duck? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is positioned directly over the duck.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00037.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the bowl? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is over the duck, not above the bowl.</thought>\n<decision>NO</decision>",
+    "direct_response": "NO"
+  },
+  {
+    "image": "frame_00038.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near the duck? Answer YES or NO.",
+    "cot_response": "<thought>Gripper jaws are clamped firmly around the duck.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00039.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the duck lifted off the table? Answer YES or NO.",
+    "cot_response": "<thought>The duck is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00040.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the bowl? Answer YES or NO.",
+    "cot_response": "<thought>Gripper and held duck are centered directly above the bowl.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00041.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the duck inside or on the bowl? Answer YES or NO.",
+    "cot_response": "<thought>The duck is resting settled inside the bowl basin.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00042.jpg",
+    "task_type": "planning",
+    "instruction": "Goal: 'Pick up the red cube and put it in the bowl'. Break into robotic subtasks.",
+    "cot_response": "<thought>I see a red cube in the center, a white mug on the left, and a bowl on the right. Gripper is at home pose.</thought>\n<plan>\n1. move to red cube\n2. grasp red cube\n3. lift red cube\n4. move to bowl\n5. place red cube in bowl\n</plan>",
+    "direct_response": "1. move to red cube\n2. grasp red cube\n3. lift red cube\n4. move to bowl\n5. place red cube in bowl"
+  },
+  {
+    "image": "frame_00043.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near or above the red cube? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is positioned directly over the red cube.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00043.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the bowl? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is over the red cube, not above the bowl.</thought>\n<decision>NO</decision>",
+    "direct_response": "NO"
+  },
+  {
+    "image": "frame_00044.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near the red cube? Answer YES or NO.",
+    "cot_response": "<thought>Gripper jaws are clamped firmly around the red cube.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00045.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the red cube lifted off the table? Answer YES or NO.",
+    "cot_response": "<thought>The red cube is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00046.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the bowl? Answer YES or NO.",
+    "cot_response": "<thought>Gripper and held red cube are centered directly above the bowl.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00047.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the red cube inside or on the bowl? Answer YES or NO.",
+    "cot_response": "<thought>The red cube is resting settled inside the bowl basin.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00048.jpg",
+    "task_type": "planning",
+    "instruction": "Goal: 'Pick up the duck and put it in the tray'. Break into robotic subtasks.",
+    "cot_response": "<thought>I see a duck in the center, a white mug on the left, and a tray on the right. Gripper is at home pose.</thought>\n<plan>\n1. move to duck\n2. grasp duck\n3. lift duck\n4. move to tray\n5. place duck in tray\n</plan>",
+    "direct_response": "1. move to duck\n2. grasp duck\n3. lift duck\n4. move to tray\n5. place duck in tray"
+  },
+  {
+    "image": "frame_00049.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near or above the duck? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is positioned directly over the duck.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00049.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the tray? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is over the duck, not above the tray.</thought>\n<decision>NO</decision>",
+    "direct_response": "NO"
+  },
+  {
+    "image": "frame_00050.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near the duck? Answer YES or NO.",
+    "cot_response": "<thought>Gripper jaws are clamped firmly around the duck.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00051.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the duck lifted off the table? Answer YES or NO.",
+    "cot_response": "<thought>The duck is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00052.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the tray? Answer YES or NO.",
+    "cot_response": "<thought>Gripper and held duck are centered directly above the tray.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00053.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the duck inside or on the tray? Answer YES or NO.",
+    "cot_response": "<thought>The duck is resting settled inside the tray basin.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00054.jpg",
+    "task_type": "planning",
+    "instruction": "Goal: 'Pick up the red cube and put it in the tray'. Break into robotic subtasks.",
+    "cot_response": "<thought>I see a red cube in the center, a white mug on the left, and a tray on the right. Gripper is at home pose.</thought>\n<plan>\n1. move to red cube\n2. grasp red cube\n3. lift red cube\n4. move to tray\n5. place red cube in tray\n</plan>",
+    "direct_response": "1. move to red cube\n2. grasp red cube\n3. lift red cube\n4. move to tray\n5. place red cube in tray"
+  },
+  {
+    "image": "frame_00055.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near or above the red cube? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is positioned directly over the red cube.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00055.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the tray? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is over the red cube, not above the tray.</thought>\n<decision>NO</decision>",
+    "direct_response": "NO"
+  },
+  {
+    "image": "frame_00056.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near the red cube? Answer YES or NO.",
+    "cot_response": "<thought>Gripper jaws are clamped firmly around the red cube.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00057.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the red cube lifted off the table? Answer YES or NO.",
+    "cot_response": "<thought>The red cube is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00058.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the tray? Answer YES or NO.",
+    "cot_response": "<thought>Gripper and held red cube are centered directly above the tray.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00059.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the red cube inside or on the tray? Answer YES or NO.",
+    "cot_response": "<thought>The red cube is resting settled inside the tray basin.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00060.jpg",
+    "task_type": "planning",
+    "instruction": "Goal: 'Pick up the duck and put it in the bowl'. Break into robotic subtasks.",
+    "cot_response": "<thought>I see a duck in the center, a white mug on the left, and a bowl on the right. Gripper is at home pose.</thought>\n<plan>\n1. move to duck\n2. grasp duck\n3. lift duck\n4. move to bowl\n5. place duck in bowl\n</plan>",
+    "direct_response": "1. move to duck\n2. grasp duck\n3. lift duck\n4. move to bowl\n5. place duck in bowl"
+  },
+  {
+    "image": "frame_00061.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near or above the duck? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is positioned directly over the duck.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00061.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the bowl? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is over the duck, not above the bowl.</thought>\n<decision>NO</decision>",
+    "direct_response": "NO"
+  },
+  {
+    "image": "frame_00062.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near the duck? Answer YES or NO.",
+    "cot_response": "<thought>Gripper jaws are clamped firmly around the duck.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00063.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the duck lifted off the table? Answer YES or NO.",
+    "cot_response": "<thought>The duck is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00064.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the bowl? Answer YES or NO.",
+    "cot_response": "<thought>Gripper and held duck are centered directly above the bowl.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00065.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the duck inside or on the bowl? Answer YES or NO.",
+    "cot_response": "<thought>The duck is resting settled inside the bowl basin.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00066.jpg",
+    "task_type": "planning",
+    "instruction": "Goal: 'Pick up the red cube and put it in the bowl'. Break into robotic subtasks.",
+    "cot_response": "<thought>I see a red cube in the center, a white mug on the left, and a bowl on the right. Gripper is at home pose.</thought>\n<plan>\n1. move to red cube\n2. grasp red cube\n3. lift red cube\n4. move to bowl\n5. place red cube in bowl\n</plan>",
+    "direct_response": "1. move to red cube\n2. grasp red cube\n3. lift red cube\n4. move to bowl\n5. place red cube in bowl"
+  },
+  {
+    "image": "frame_00067.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near or above the red cube? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is positioned directly over the red cube.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00067.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the bowl? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is over the red cube, not above the bowl.</thought>\n<decision>NO</decision>",
+    "direct_response": "NO"
+  },
+  {
+    "image": "frame_00068.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near the red cube? Answer YES or NO.",
+    "cot_response": "<thought>Gripper jaws are clamped firmly around the red cube.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00069.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the red cube lifted off the table? Answer YES or NO.",
+    "cot_response": "<thought>The red cube is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00070.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the bowl? Answer YES or NO.",
+    "cot_response": "<thought>Gripper and held red cube are centered directly above the bowl.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00071.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the red cube inside or on the bowl? Answer YES or NO.",
+    "cot_response": "<thought>The red cube is resting settled inside the bowl basin.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00072.jpg",
+    "task_type": "planning",
+    "instruction": "Goal: 'Pick up the duck and put it in the tray'. Break into robotic subtasks.",
+    "cot_response": "<thought>I see a duck in the center, a white mug on the left, and a tray on the right. Gripper is at home pose.</thought>\n<plan>\n1. move to duck\n2. grasp duck\n3. lift duck\n4. move to tray\n5. place duck in tray\n</plan>",
+    "direct_response": "1. move to duck\n2. grasp duck\n3. lift duck\n4. move to tray\n5. place duck in tray"
+  },
+  {
+    "image": "frame_00073.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near or above the duck? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is positioned directly over the duck.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00073.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the tray? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is over the duck, not above the tray.</thought>\n<decision>NO</decision>",
+    "direct_response": "NO"
+  },
+  {
+    "image": "frame_00074.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near the duck? Answer YES or NO.",
+    "cot_response": "<thought>Gripper jaws are clamped firmly around the duck.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00075.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the duck lifted off the table? Answer YES or NO.",
+    "cot_response": "<thought>The duck is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00076.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the tray? Answer YES or NO.",
+    "cot_response": "<thought>Gripper and held duck are centered directly above the tray.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00077.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the duck inside or on the tray? Answer YES or NO.",
+    "cot_response": "<thought>The duck is resting settled inside the tray basin.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00078.jpg",
+    "task_type": "planning",
+    "instruction": "Goal: 'Pick up the red cube and put it in the tray'. Break into robotic subtasks.",
+    "cot_response": "<thought>I see a red cube in the center, a white mug on the left, and a tray on the right. Gripper is at home pose.</thought>\n<plan>\n1. move to red cube\n2. grasp red cube\n3. lift red cube\n4. move to tray\n5. place red cube in tray\n</plan>",
+    "direct_response": "1. move to red cube\n2. grasp red cube\n3. lift red cube\n4. move to tray\n5. place red cube in tray"
+  },
+  {
+    "image": "frame_00079.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near or above the red cube? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is positioned directly over the red cube.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00079.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the tray? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is over the red cube, not above the tray.</thought>\n<decision>NO</decision>",
+    "direct_response": "NO"
+  },
+  {
+    "image": "frame_00080.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near the red cube? Answer YES or NO.",
+    "cot_response": "<thought>Gripper jaws are clamped firmly around the red cube.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00081.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the red cube lifted off the table? Answer YES or NO.",
+    "cot_response": "<thought>The red cube is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00082.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the tray? Answer YES or NO.",
+    "cot_response": "<thought>Gripper and held red cube are centered directly above the tray.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00083.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the red cube inside or on the tray? Answer YES or NO.",
+    "cot_response": "<thought>The red cube is resting settled inside the tray basin.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00084.jpg",
+    "task_type": "planning",
+    "instruction": "Goal: 'Pick up the duck and put it in the bowl'. Break into robotic subtasks.",
+    "cot_response": "<thought>I see a duck in the center, a white mug on the left, and a bowl on the right. Gripper is at home pose.</thought>\n<plan>\n1. move to duck\n2. grasp duck\n3. lift duck\n4. move to bowl\n5. place duck in bowl\n</plan>",
+    "direct_response": "1. move to duck\n2. grasp duck\n3. lift duck\n4. move to bowl\n5. place duck in bowl"
+  },
+  {
+    "image": "frame_00085.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near or above the duck? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is positioned directly over the duck.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00085.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the bowl? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is over the duck, not above the bowl.</thought>\n<decision>NO</decision>",
+    "direct_response": "NO"
+  },
+  {
+    "image": "frame_00086.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near the duck? Answer YES or NO.",
+    "cot_response": "<thought>Gripper jaws are clamped firmly around the duck.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00087.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the duck lifted off the table? Answer YES or NO.",
+    "cot_response": "<thought>The duck is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00088.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the bowl? Answer YES or NO.",
+    "cot_response": "<thought>Gripper and held duck are centered directly above the bowl.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00089.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the duck inside or on the bowl? Answer YES or NO.",
+    "cot_response": "<thought>The duck is resting settled inside the bowl basin.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00090.jpg",
+    "task_type": "planning",
+    "instruction": "Goal: 'Pick up the red cube and put it in the bowl'. Break into robotic subtasks.",
+    "cot_response": "<thought>I see a red cube in the center, a white mug on the left, and a bowl on the right. Gripper is at home pose.</thought>\n<plan>\n1. move to red cube\n2. grasp red cube\n3. lift red cube\n4. move to bowl\n5. place red cube in bowl\n</plan>",
+    "direct_response": "1. move to red cube\n2. grasp red cube\n3. lift red cube\n4. move to bowl\n5. place red cube in bowl"
+  },
+  {
+    "image": "frame_00091.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near or above the red cube? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is positioned directly over the red cube.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00091.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the bowl? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is over the red cube, not above the bowl.</thought>\n<decision>NO</decision>",
+    "direct_response": "NO"
+  },
+  {
+    "image": "frame_00092.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near the red cube? Answer YES or NO.",
+    "cot_response": "<thought>Gripper jaws are clamped firmly around the red cube.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00093.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the red cube lifted off the table? Answer YES or NO.",
+    "cot_response": "<thought>The red cube is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00094.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the bowl? Answer YES or NO.",
+    "cot_response": "<thought>Gripper and held red cube are centered directly above the bowl.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00095.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the red cube inside or on the bowl? Answer YES or NO.",
+    "cot_response": "<thought>The red cube is resting settled inside the bowl basin.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00096.jpg",
+    "task_type": "planning",
+    "instruction": "Goal: 'Pick up the duck and put it in the tray'. Break into robotic subtasks.",
+    "cot_response": "<thought>I see a duck in the center, a white mug on the left, and a tray on the right. Gripper is at home pose.</thought>\n<plan>\n1. move to duck\n2. grasp duck\n3. lift duck\n4. move to tray\n5. place duck in tray\n</plan>",
+    "direct_response": "1. move to duck\n2. grasp duck\n3. lift duck\n4. move to tray\n5. place duck in tray"
+  },
+  {
+    "image": "frame_00097.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near or above the duck? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is positioned directly over the duck.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00097.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the tray? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is over the duck, not above the tray.</thought>\n<decision>NO</decision>",
+    "direct_response": "NO"
+  },
+  {
+    "image": "frame_00098.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near the duck? Answer YES or NO.",
+    "cot_response": "<thought>Gripper jaws are clamped firmly around the duck.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00099.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the duck lifted off the table? Answer YES or NO.",
+    "cot_response": "<thought>The duck is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00100.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the tray? Answer YES or NO.",
+    "cot_response": "<thought>Gripper and held duck are centered directly above the tray.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00101.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the duck inside or on the tray? Answer YES or NO.",
+    "cot_response": "<thought>The duck is resting settled inside the tray basin.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00102.jpg",
+    "task_type": "planning",
+    "instruction": "Goal: 'Pick up the red cube and put it in the tray'. Break into robotic subtasks.",
+    "cot_response": "<thought>I see a red cube in the center, a white mug on the left, and a tray on the right. Gripper is at home pose.</thought>\n<plan>\n1. move to red cube\n2. grasp red cube\n3. lift red cube\n4. move to tray\n5. place red cube in tray\n</plan>",
+    "direct_response": "1. move to red cube\n2. grasp red cube\n3. lift red cube\n4. move to tray\n5. place red cube in tray"
+  },
+  {
+    "image": "frame_00103.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near or above the red cube? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is positioned directly over the red cube.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00103.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the tray? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is over the red cube, not above the tray.</thought>\n<decision>NO</decision>",
+    "direct_response": "NO"
+  },
+  {
+    "image": "frame_00104.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near the red cube? Answer YES or NO.",
+    "cot_response": "<thought>Gripper jaws are clamped firmly around the red cube.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00105.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the red cube lifted off the table? Answer YES or NO.",
+    "cot_response": "<thought>The red cube is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00106.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the tray? Answer YES or NO.",
+    "cot_response": "<thought>Gripper and held red cube are centered directly above the tray.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00107.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the red cube inside or on the tray? Answer YES or NO.",
+    "cot_response": "<thought>The red cube is resting settled inside the tray basin.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00108.jpg",
+    "task_type": "planning",
+    "instruction": "Goal: 'Pick up the duck and put it in the bowl'. Break into robotic subtasks.",
+    "cot_response": "<thought>I see a duck in the center, a white mug on the left, and a bowl on the right. Gripper is at home pose.</thought>\n<plan>\n1. move to duck\n2. grasp duck\n3. lift duck\n4. move to bowl\n5. place duck in bowl\n</plan>",
+    "direct_response": "1. move to duck\n2. grasp duck\n3. lift duck\n4. move to bowl\n5. place duck in bowl"
+  },
+  {
+    "image": "frame_00109.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near or above the duck? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is positioned directly over the duck.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00109.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the bowl? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is over the duck, not above the bowl.</thought>\n<decision>NO</decision>",
+    "direct_response": "NO"
+  },
+  {
+    "image": "frame_00110.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near the duck? Answer YES or NO.",
+    "cot_response": "<thought>Gripper jaws are clamped firmly around the duck.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00111.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the duck lifted off the table? Answer YES or NO.",
+    "cot_response": "<thought>The duck is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00112.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the bowl? Answer YES or NO.",
+    "cot_response": "<thought>Gripper and held duck are centered directly above the bowl.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00113.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the duck inside or on the bowl? Answer YES or NO.",
+    "cot_response": "<thought>The duck is resting settled inside the bowl basin.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00114.jpg",
+    "task_type": "planning",
+    "instruction": "Goal: 'Pick up the red cube and put it in the bowl'. Break into robotic subtasks.",
+    "cot_response": "<thought>I see a red cube in the center, a white mug on the left, and a bowl on the right. Gripper is at home pose.</thought>\n<plan>\n1. move to red cube\n2. grasp red cube\n3. lift red cube\n4. move to bowl\n5. place red cube in bowl\n</plan>",
+    "direct_response": "1. move to red cube\n2. grasp red cube\n3. lift red cube\n4. move to bowl\n5. place red cube in bowl"
+  },
+  {
+    "image": "frame_00115.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near or above the red cube? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is positioned directly over the red cube.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00115.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the bowl? Answer YES or NO.",
+    "cot_response": "<thought>Gripper is over the red cube, not above the bowl.</thought>\n<decision>NO</decision>",
+    "direct_response": "NO"
+  },
+  {
+    "image": "frame_00116.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned near the red cube? Answer YES or NO.",
+    "cot_response": "<thought>Gripper jaws are clamped firmly around the red cube.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00117.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the red cube lifted off the table? Answer YES or NO.",
+    "cot_response": "<thought>The red cube is elevated in the air, clear of the table surface.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00118.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the robot gripper positioned above the bowl? Answer YES or NO.",
+    "cot_response": "<thought>Gripper and held red cube are centered directly above the bowl.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  },
+  {
+    "image": "frame_00119.jpg",
+    "task_type": "stage_gate",
+    "instruction": "Is the red cube inside or on the bowl? Answer YES or NO.",
+    "cot_response": "<thought>The red cube is resting settled inside the bowl basin.</thought>\n<decision>YES</decision>",
+    "direct_response": "YES"
+  }
+]

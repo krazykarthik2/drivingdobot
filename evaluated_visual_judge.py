@@ -67,24 +67,31 @@ class EvaluatedVisualJudge:
         ]
         text_prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True)
         inputs = self.processor(text=text_prompt, images=[pil_img], return_tensors="pt").to(self.device)
-        output_ids = self.model.generate(**inputs, max_new_tokens=60 if self.mode == "cot" else 20)
-        generated_ids = output_ids[0][inputs["input_ids"].shape[1]:]
-        raw_res = self.processor.decode(generated_ids, skip_special_tokens=True).strip()
 
-        # Decision extraction
-        res_lower = raw_res.lower()
-        if "<decision>yes</decision>" in res_lower:
-            is_yes = True
-        elif "<decision>no</decision>" in res_lower:
-            is_yes = False
-        elif "inside" in res_lower or "on the tray" in res_lower:
-            # Model directly confirmed semantic containment
-            is_yes = True
-        elif "yes" in res_lower:
-            is_yes = True
-        elif "no" in res_lower:
-            is_yes = False
-        else:
-            is_yes = False
+        # STRICT BINARY LOGIT / PROBABILITY SAMPLING:
+        # Instead of parsing arbitrary English responses ("Inside.", "Sure", etc.),
+        # extract the exact logits of token 'Yes' vs token 'No' at the decision step.
+        outputs = self.model(**inputs)
+        next_token_logits = outputs.logits[0, -1, :]
 
-        return raw_res, is_yes
+        # Look up token IDs for 'Yes' and 'No'
+        yes_tokens = [self.processor.tokenizer.encode(t, add_special_tokens=False)[-1] for t in ["Yes", "yes", "YES"]]
+        no_tokens = [self.processor.tokenizer.encode(t, add_special_tokens=False)[-1] for t in ["No", "no", "NO"]]
+
+        yes_score = max(next_token_logits[tid].item() for tid in yes_tokens)
+        no_score = max(next_token_logits[tid].item() for tid in no_tokens)
+
+        # Softmax probability
+        exp_yes = np.exp(yes_score - max(yes_score, no_score))
+        exp_no = np.exp(no_score - max(yes_score, no_score))
+        prob_yes = exp_yes / (exp_yes + exp_no)
+
+        # Also generate textual output strictly for logging/visualization
+        output_ids = self.model.generate(**inputs, max_new_tokens=40 if self.mode == "cot" else 5)
+        raw_res = self.processor.decode(output_ids[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
+
+        # Strict Binary Decision: True ONLY if P(Yes) > P(No)
+        is_yes = bool(prob_yes > 0.50)
+        formatted_res = f"P(Yes)={prob_yes:.2f} | Raw='{raw_res}'"
+
+        return formatted_res, is_yes

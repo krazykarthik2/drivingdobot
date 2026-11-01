@@ -29,9 +29,9 @@ volume = modal.Volume.from_name("smolvlm-adapters-vol", create_if_missing=True)
     image=image,
     gpu="T4",  # Lowest cost hardware on Modal (~$0.59/hr, ~0.02 USD total cost)
     volumes={"/adapters": volume},
-    timeout=600
+    timeout=1200
 )
-def train_smolvlm_modal(mode: str = "cot", epochs: int = 5, lr: float = 2e-4):
+def train_smolvlm_modal(mode: str = "cot", epochs: int = 3, lr: float = 2e-4):
     """
     mode: 'cot' (Short Chain-of-Thought) or 'direct' (Direct Structured Tokens)
     """
@@ -168,12 +168,12 @@ def main(mode: str = "both"):
 
     if mode in ["cot", "both"]:
         print("\n>>> Launching Short CoT Adapter Fine-Tuning (smolvlm_lora_cot)...")
-        res_cot = train_smolvlm_modal.remote(mode="cot", epochs=5)
+        res_cot = train_smolvlm_modal.remote(mode="cot", epochs=3)
         print(f"Result Short CoT: {res_cot}")
 
     if mode in ["direct", "both"]:
         print("\n>>> Launching Direct Structured Tokens Adapter (smolvlm_lora_direct)...")
-        res_dir = train_smolvlm_modal.remote(mode="direct", epochs=4)
+        res_dir = train_smolvlm_modal.remote(mode="direct", epochs=3)
         print(f"Result Direct Tokens: {res_dir}")
 
     print("\n=================================================================")
