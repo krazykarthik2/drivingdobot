@@ -254,11 +254,11 @@ def run_pure_flow():
 
     if not subtasks:
         subtasks = [
-            "move to duck",
-            "grasp duck",
-            "lift duck",
+            "move to yellow duck",
+            "grasp yellow duck",
+            "lift yellow duck",
             "move to tray",
-            "place duck in tray"
+            "place yellow duck in tray"
         ]
 
     curr_j = env.get_joint_state_rad()

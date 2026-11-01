@@ -150,11 +150,11 @@ def run_evaluation_experiment(mode="cot", out_video_path="eval_cot.mp4"):
     print(f"\n[{mode.upper()} Plan Generated]:\n{plan_raw}\n")
 
     subtasks = [
-        "move to duck",
-        "grasp duck",
-        "lift duck",
+        "move to yellow duck",
+        "grasp yellow duck",
+        "lift yellow duck",
         "move to tray",
-        "place duck in tray"
+        "place yellow duck in tray"
     ]
 
     curr_j = env.get_joint_state_rad()
