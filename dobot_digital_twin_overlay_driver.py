@@ -2,11 +2,14 @@
 dobot_digital_twin_overlay_driver.py
 
 Closed-Loop Real Dobot Driver with Live Calibrated Camera & Digital Twin Overlay
-- Multi-Threaded Architecture:
-  * Thread 1: Camera capture reader (runs continuously at full frame rate)
-  * Thread 2: Real Dobot motor actuation worker (executes prompts in background so UI never freezes)
+- Multi-Threaded Real-Time 24+ FPS Architecture:
+  * Thread 1: Camera acquisition reader (continuous frame capture)
+  * Thread 2: Robot Cartesian actuation worker (runs completely async)
   * Thread 3: Terminal CLI prompt reader
-  * Thread 4 (Main): OpenCV GUI event loop and PyBullet rendering
+  * Thread 4 (Main): Real-time PyBullet simulation rendering, ArUco virtual marker overlays,
+    telemetry, and OpenCV display running at steady 24+ FPS.
+- Renders virtual ArUco markers [0, 1] & [2, 3] directly in the simulation overlay so you can
+  see exact pixel-level alignment live continuously.
 - Full 8-DOF Homography & Perspective Warping overlaying real camera onto simulation.
 - Accepts natural language instructions (e.g. 'push blue pen to the right', 'home', etc.)
 """
@@ -42,7 +45,7 @@ class RealDobotTwinSynchronizer:
         print(f"Robot Port:       {self.robot_port}")
         print(f"Camera Index:     {self.cam_idx}")
         print(f"Overlay Alpha:    {self.blend_alpha*100:.0f}% Twin / {(1-self.blend_alpha)*100:.0f}% Real Camera")
-        print("Architecture:     Decoupled Multi-Threaded (Render / Robot / Camera / CLI)")
+        print("Rendering Engine: Continuous Real-Time ~24+ FPS Loop with Virtual Markers")
         print("=" * 70)
 
         # 1. Initialize PyBullet Digital Twin Simulation
@@ -52,6 +55,22 @@ class RealDobotTwinSynchronizer:
             {"color": "red", "box_pos": [0.24, 0.08], "plate_pos": [0.22, -0.10], "plate_color": "green"}
         ]
         self.env.spawn_colored_boxes_and_plates(task_config)
+
+        # 3D Projection Matrices
+        self.V = np.array(self.env.view_matrix).reshape((4, 4), order='F')
+        self.P = np.array(self.env.proj_matrix).reshape((4, 4), order='F')
+        self.VP = self.P @ self.V
+
+        # Virtual ArUco markers defined in 3D world matching calibrated camera layout:
+        # Near Row: Tags 0 & 1
+        # Far Row:  Tags 3 & 2
+        z_table = -0.048
+        self.sim_tags_def = {
+            0: ([0.059, -0.045, z_table], (240, 200, 50)),
+            1: ([0.059, +0.045, z_table], (50, 240, 240)),
+            2: ([0.173, +0.045, z_table], (50, 240, 50)),
+            3: ([0.173, -0.045, z_table], (240, 50, 240))
+        }
 
         # 2. Camera feed acquisition with dedicated background thread
         print(f"[2/4] Connecting to Camera (Index {self.cam_idx})...")
@@ -75,9 +94,11 @@ class RealDobotTwinSynchronizer:
         self.dobot = None
         self.connected = False
         self.robot_lock = threading.Lock()
+        self.current_real_pose = [200.0, 0.0, 40.0, 0.0]
         try:
             self.dobot = pydobot.Dobot(port=self.robot_port, verbose=False)
             initial_pose = self.dobot.pose()
+            self.current_real_pose = list(initial_pose)
             self.connected = True
             print(f"[SUCCESS] Real Dobot Connected! Initial Pose: X={initial_pose[0]:.1f}, Y={initial_pose[1]:.1f}, Z={initial_pose[2]:.1f} mm\n")
             self._sync_twin_to_real(initial_pose[0], initial_pose[1], initial_pose[2], initial_pose[3], False)
@@ -105,29 +126,83 @@ class RealDobotTwinSynchronizer:
                 print(f"[Warning] Could not load alignment matrix: {e}")
 
     def _camera_reader_loop(self):
-        """Dedicated thread continuously fetching the freshest camera frame."""
+        """Dedicated thread continuously fetching the freshest camera frame at camera hardware rate."""
         while self.running:
             ret, frame = self.cap.read()
             if ret and frame is not None:
                 with self.frame_lock:
                     self.latest_frame = frame
-            time.sleep(0.015)
+            time.sleep(0.010)
+
+    def sim_proj(self, pt_3d):
+        """Projects 3D simulation coordinate [x, y, z] to 2D screen coordinate [u, v]."""
+        clip = self.VP @ np.array([pt_3d[0], pt_3d[1], pt_3d[2], 1.0])
+        ndc = clip[:3] / clip[3]
+        u = ((ndc[0] + 1.0) / 2.0) * (640.0 - 1.0)
+        v = ((1.0 - ndc[1]) / 2.0) * (480.0 - 1.0)
+        return [int(u), int(v)]
+
+    def render_sim_with_virtual_markers(self):
+        """Renders PyBullet digital twin and draws the 4 virtual ArUco markers with IDs & boundaries."""
+        sim_rgb = self.env.render_frame()
+        sim_bgr = cv2.cvtColor(sim_rgb, cv2.COLOR_RGB2BGR)
+
+        hw = 0.040 # 8cm marker half-size
+        for tid, (center, color) in self.sim_tags_def.items():
+            cx, cy, cz = center
+            corners_3d = [
+                [cx - hw, cy - hw, cz],
+                [cx - hw, cy + hw, cz],
+                [cx + hw, cy + hw, cz],
+                [cx + hw, cy - hw, cz]
+            ]
+            poly = np.array([self.sim_proj(c) for c in corners_3d], dtype=np.int32)
+            cv2.fillPoly(sim_bgr, [poly], (25, 25, 25))
+            cv2.polylines(sim_bgr, [poly], isClosed=True, color=color, thickness=2)
+
+            # Inner pattern border for visual crosshair alignment
+            hw_in = 0.024
+            inner_3d = [
+                [cx - hw_in, cy - hw_in, cz],
+                [cx - hw_in, cy + hw_in, cz],
+                [cx + hw_in, cy + hw_in, cz],
+                [cx + hw_in, cy - hw_in, cz]
+            ]
+            poly_in = np.array([self.sim_proj(c) for c in inner_3d], dtype=np.int32)
+            cv2.fillPoly(sim_bgr, [poly_in], (210, 210, 210))
+
+            c_px = self.sim_proj([cx, cy, cz])
+            cv2.putText(sim_bgr, f'{tid}', (c_px[0] - 6, c_px[1] + 6), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
+            cv2.putText(sim_bgr, f'SIM {tid}', (c_px[0] - 22, c_px[1] - 14), cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1)
+
+        return sim_bgr
 
     def _sync_twin_to_real(self, x_mm, y_mm, z_mm, r_deg=0.0, grip=False):
-        """Drives virtual PyBullet twin to exactly match real physical coordinates."""
+        """Drives virtual PyBullet twin to match physical coordinates."""
         x_m = float(x_mm) / 1000.0
         y_m = float(y_mm) / 1000.0
         z_m = float(z_mm) / 1000.0
         r_rad = np.deg2rad(float(r_deg))
 
         self.env.set_cartesian_target(x_m, y_m, z_m, r=r_rad, gripper_close=grip)
-        for _ in range(3):
+        for _ in range(2):
             p.stepSimulation()
 
     def move_real_robot(self, target_x, target_y, target_z, max_time=3.5):
-        """Guaranteed direct Cartesian motor actuation to reach target physical coordinates."""
+        """Direct Cartesian motor actuation in background thread with live pose tracking."""
         if not self.connected or not self.dobot:
-            time.sleep(0.4)
+            # Simulate smooth trajectory in dry-run
+            steps = 25
+            cur = list(self.current_real_pose)
+            for s in range(1, steps + 1):
+                if not self.running:
+                    break
+                frac = s / float(steps)
+                x = cur[0] + (target_x - cur[0]) * frac
+                y = cur[1] + (target_y - cur[1]) * frac
+                z = cur[2] + (target_z - cur[2]) * frac
+                self.current_real_pose = [x, y, z, 0.0]
+                time.sleep(0.04)
             return
 
         with self.robot_lock:
@@ -135,6 +210,7 @@ class RealDobotTwinSynchronizer:
             while time.time() - t0 < max_time and self.running:
                 try:
                     cur_pose = self.dobot.pose()
+                    self.current_real_pose = list(cur_pose)
                     dx = target_x - cur_pose[0]
                     dy = target_y - cur_pose[1]
                     dz = target_z - cur_pose[2]
@@ -156,7 +232,7 @@ class RealDobotTwinSynchronizer:
                     m.params = bytearray([0, cmd])
                     self.dobot._send_message(m)
                     self.dobot._read_message()
-                    time.sleep(0.06)
+                    time.sleep(0.05)
                 except Exception:
                     break
 
@@ -219,7 +295,7 @@ class RealDobotTwinSynchronizer:
             self.current_action_status = f"{wp['desc']} ({step_i}/{len(waypoints)})"
             print(f"  Stage {step_i}/{len(waypoints)}: {wp['desc']} -> Target [X={wp['x']:.1f}, Y={wp['y']:.1f}, Z={wp['z']:.1f} mm]")
             
-            # 1. Drive physical arm with verified Cartesian actuation
+            # Drive physical arm
             self.move_real_robot(wp["x"], wp["y"], wp["z"])
             if self.connected and self.dobot:
                 with self.robot_lock:
@@ -228,9 +304,6 @@ class RealDobotTwinSynchronizer:
                         self.dobot.suck(wp["grip"])
                     except Exception:
                         pass
-
-            # 2. Sync digital twin
-            self._sync_twin_to_real(wp["x"], wp["y"], wp["z"], 0.0, wp["grip"])
 
         self.current_action_status = "Task Completed"
         print("[SUCCESS] Prompt completed!\n")
@@ -263,8 +336,16 @@ class RealDobotTwinSynchronizer:
         cv2.namedWindow(window_title, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(window_title, 960, 720)
 
+        # 24+ FPS Frame Timing Control
+        target_fps = 24.0
+        frame_time = 1.0 / target_fps
+        fps_actual = 24.0
+        t_prev = time.time()
+
         while self.running:
-            # 1. Get latest camera frame safely from decoupled thread
+            loop_start = time.time()
+
+            # 1. Fetch latest frame from decoupled camera thread
             with self.frame_lock:
                 frame = self.latest_frame.copy() if self.latest_frame is not None else None
 
@@ -272,20 +353,15 @@ class RealDobotTwinSynchronizer:
                 time.sleep(0.01)
                 continue
 
-            # 2. Query real physical arm pose without blocking UI
-            if self.connected and self.dobot:
-                try:
-                    with self.robot_lock:
-                        p_real = self.dobot.pose()
-                    self._sync_twin_to_real(p_real[0], p_real[1], p_real[2], p_real[3], False)
-                except Exception:
-                    pass
+            # 2. Continuous real-time twin synchronization
+            # Uses current tracked pose to keep twin moving in smooth lockstep
+            p_cur = self.current_real_pose
+            self._sync_twin_to_real(p_cur[0], p_cur[1], p_cur[2], p_cur[3], False)
 
-            # 3. Render Sim Twin in PyBullet
-            sim_rgb = self.env.render_frame()
-            sim_bgr = cv2.cvtColor(sim_rgb, cv2.COLOR_RGB2BGR)
+            # 3. Continuous Simulation Rendering WITH Virtual ArUco Markers
+            sim_view = self.render_sim_with_virtual_markers()
 
-            # 4. Apply full perspective homography warping to camera feed
+            # 4. Perspective Homography Warping
             h, w = frame.shape[:2]
             if self.homography_matrix is not None:
                 cam_warped = cv2.warpPerspective(frame, self.homography_matrix, (w, h))
@@ -299,22 +375,37 @@ class RealDobotTwinSynchronizer:
                 cam_warped = frame
 
             # 5. 50/50 Overlay Blend
-            overlay = cv2.addWeighted(cam_warped, 1.0 - self.blend_alpha, sim_bgr, self.blend_alpha, 0.0)
+            overlay = cv2.addWeighted(cam_warped, 1.0 - self.blend_alpha, sim_view, self.blend_alpha, 0.0)
 
-            # 6. Status and Telemetry HUD Overlay
+            # Calculate actual live FPS
+            now = time.time()
+            dt = now - t_prev
+            t_prev = now
+            if dt > 0:
+                fps_actual = 0.9 * fps_actual + 0.1 * (1.0 / dt)
+
+            # 6. Status and Telemetry HUD
             cv2.rectangle(overlay, (0, 0), (overlay.shape[1], 48), (20, 20, 20), -1)
             status_txt = "HARDWARE: ONLINE (COM13)" if self.connected else "HARDWARE: DRY-RUN"
             color_txt = (40, 230, 40) if self.connected else (40, 180, 240)
-            cv2.putText(overlay, f"TWIN OVERLAY (Real + Sim) | {status_txt}", (15, 22),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.58, color_txt, 2)
-            cv2.putText(overlay, f"ACTION: {self.current_action_status}", (15, 42),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 220, 220), 1)
+            cv2.putText(overlay, f"TWIN OVERLAY (Real + Sim) | {status_txt} | {fps_actual:.1f} FPS", (15, 22),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, color_txt, 2)
+            cv2.putText(overlay, f"ACTION: {self.current_action_status} | POSE: X={p_cur[0]:.1f}, Y={p_cur[1]:.1f}, Z={p_cur[2]:.1f}",
+                        (15, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (220, 220, 220), 1)
 
             cv2.imshow(window_title, overlay)
-            key = cv2.waitKey(15) & 0xFF
+            key = cv2.waitKey(1) & 0xFF
             if key == ord('q') or key == 27:
                 self.running = False
                 break
+            elif key == 9: # TAB cycles blend transparency (20% -> 50% -> 80%)
+                self.blend_alpha = 0.20 if self.blend_alpha >= 0.70 else (0.50 if self.blend_alpha <= 0.30 else 0.80)
+
+            # Maintain continuous ~24 FPS rate
+            elapsed = time.time() - loop_start
+            sleep_needed = frame_time - elapsed
+            if sleep_needed > 0:
+                time.sleep(sleep_needed)
 
         print("\nCleaning up driver threads and hardware...")
         self.running = False
