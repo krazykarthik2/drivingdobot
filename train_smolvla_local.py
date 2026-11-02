@@ -221,8 +221,7 @@ def train_local(data_path="real_dobot_demonstrations.pkl", epochs=3, batch_size=
                 optimizer.step()
                 optimizer.zero_grad()
 
-            if (step + 1) % 50 == 0 or (step + 1) == len(loader):
-                print(f"  Epoch [{epoch+1}/{epochs}] Step [{step+1}/{len(loader)}] | Flow Loss: {loss.item() * grad_accum_steps:.4f}")
+            print(f"  Epoch [{epoch+1}/{epochs}] Step [{step+1}/{len(loader)}] | Flow Loss: {loss.item() * grad_accum_steps:.4f}", flush=True)
 
         avg_loss = epoch_loss / len(loader)
         print(f"[Epoch {epoch+1} Complete] Average Flow Loss: {avg_loss:.4f}\n")
