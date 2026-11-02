@@ -32,6 +32,7 @@ sys.modules['tensorflow'] = None
 import pydobot
 from pydobot.message import Message
 from dobot_color_box_env import DobotColorBoxEnv, GRIPPER_HEIGHT_OFFSET
+from vlm_task_planner import SmolVLMTaskPlanner
 
 
 class RealDobotTwinSynchronizer:
@@ -111,7 +112,10 @@ class RealDobotTwinSynchronizer:
         self.recalib_status_msg = ""
         self.recalib_status_time = 0
 
-        # 5. Robot motion background task queue
+        # 5. SmolVLM Semantic Task Planner
+        self.planner = SmolVLMTaskPlanner(sim_tags_def=self.sim_tags_def)
+
+        # 6. Robot motion background task queue
         self.motion_queue = queue.Queue()
         self.current_action_status = "Ready / Standby"
         self.robot_thread = threading.Thread(target=self._robot_worker_loop, daemon=True)
@@ -349,41 +353,24 @@ class RealDobotTwinSynchronizer:
             self.motion_queue.task_done()
 
     def _execute_plan_background(self, prompt: str):
-        print(f"\n[Executing Prompt]: '{prompt}'")
-        cmd_lower = prompt.lower()
+        # Fetch current frame for visual grounding
+        with self.frame_lock:
+            cur_frame = self.latest_frame.copy() if self.latest_frame is not None else None
 
-        if "right" in cmd_lower:
-            waypoints = [
-                {"desc": "Approach object", "x": 190.0, "y": 30.0, "z": 20.0, "grip": False},
-                {"desc": "Push object right", "x": 190.0, "y": -60.0, "z": 20.0, "grip": False},
-                {"desc": "Retract arm", "x": 200.0, "y": 0.0, "z": 45.0, "grip": False}
-            ]
-        elif "left" in cmd_lower:
-            waypoints = [
-                {"desc": "Approach object", "x": 190.0, "y": -30.0, "z": 20.0, "grip": False},
-                {"desc": "Push object left", "x": 190.0, "y": 60.0, "z": 20.0, "grip": False},
-                {"desc": "Retract arm", "x": 200.0, "y": 0.0, "z": 45.0, "grip": False}
-            ]
-        elif cmd_lower in ["home", "standby"]:
-            waypoints = [
-                {"desc": "Moving to home standby", "x": 200.0, "y": 0.0, "z": 40.0, "grip": False}
-            ]
-        else: # Standard Pick-and-Place
-            waypoints = [
-                {"desc": "Hover above source tag", "x": 160.0, "y": 45.0, "z": 40.0, "grip": False},
-                {"desc": "Descend to object", "x": 160.0, "y": 45.0, "z": -15.0, "grip": False},
-                {"desc": "Grip object", "x": 160.0, "y": 45.0, "z": -15.0, "grip": True},
-                {"desc": "Lift object", "x": 160.0, "y": 45.0, "z": 40.0, "grip": True},
-                {"desc": "Transfer to target destination", "x": 210.0, "y": -50.0, "z": 40.0, "grip": True},
-                {"desc": "Lower object to surface", "x": 210.0, "y": -50.0, "z": -10.0, "grip": True},
-                {"desc": "Release and retract", "x": 200.0, "y": 0.0, "z": 40.0, "grip": False}
-            ]
+        # Plan task using SmolVLM Task Planner
+        plan_data = self.planner.plan_instruction(prompt, live_frame=cur_frame, homography_matrix=self.homography_matrix)
+        plan_name = plan_data["plan_name"]
+        thought = plan_data["thought"]
+        waypoints = plan_data["stages"]
+
+        print(f"\n[SmolVLM Reasoning]: {thought}")
+        print(f"[Executing Plan]: '{plan_name}' ({len(waypoints)} stages)")
 
         for step_i, wp in enumerate(waypoints, 1):
             if not self.running:
                 break
             self.current_action_status = f"{wp['desc']} ({step_i}/{len(waypoints)})"
-            print(f"  Stage {step_i}/{len(waypoints)}: {wp['desc']} -> Target [X={wp['x']:.1f}, Y={wp['y']:.1f}, Z={wp['z']:.1f} mm]")
+            print(f"  Stage {step_i}/{len(waypoints)}: {wp['desc']} -> Target [X={wp['x']:.1f}, Y={wp['y']:.1f}, Z={wp['z']:.1f} mm] | Grip={wp['grip']}")
             
             # Drive physical arm
             self.move_real_robot(wp["x"], wp["y"], wp["z"])
@@ -396,7 +383,7 @@ class RealDobotTwinSynchronizer:
                         pass
 
         self.current_action_status = "Task Completed"
-        print("[SUCCESS] Prompt completed!\n")
+        print(f"[SUCCESS] Plan '{plan_name}' completed!\n")
 
     def command_input_thread(self):
         print("Ready for prompts! Type instructions anytime:")
