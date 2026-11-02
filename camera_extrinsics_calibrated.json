@@ -1,17 +1,17 @@
 {
-  "timestamp": 1793605369.6212296,
+  "timestamp": 1793605873.7103336,
   "marker_size_m": 0.08,
   "dobot_gap_m": 0.01,
   "inter_tag_gap_m": 0.01,
   "camera_top": {
     "index": 1,
     "backend": "MSMF",
-    "fps": 66.80636478027492
+    "fps": 66.12534211156937
   },
   "camera_side": {
     "index": 2,
     "backend": "DSHOW",
-    "fps": 66.80636478027492
+    "fps": 66.12534211156937
   },
   "calibrated": true
 }

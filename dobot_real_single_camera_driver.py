@@ -2,27 +2,22 @@
 dobot_real_single_camera_driver.py
 
 Closed-Loop Natural Language Prompt Driver for Dobot Magician (Single Top-Camera Mode)
-Hardware Configuration:
-- Top Camera (CAM 1): External USB Camera (Index 1) for ArUco workspace tracking
-- Lateral Camera: Disabled (unplugged for USB port availability)
-- Robot Serial Port: COM13 (CH9102 / CH340 USB-to-UART bridge)
-- Calibration Geometry: 8x8 cm tags, 1 cm Dobot-to-Tag gap, 1 cm Inter-tag gap
+High-reliability native serial communication + Top Camera ArUco tracking.
 """
 
 import os
 import sys
 import time
-import json
 import threading
 import cv2
 import numpy as np
 
-# Windows environment overrides
+# Suppress conflicting libraries
 sys.modules['jax'] = None
 sys.modules['jaxlib'] = None
 sys.modules['tensorflow'] = None
 
-from real_dobot_controller import RealDobotController
+import pydobot
 
 
 class SingleCameraWorkspaceTracker:
@@ -79,36 +74,45 @@ class SingleCameraWorkspaceTracker:
 
 
 class DobotSingleCameraPromptDriver:
-    def __init__(self, cam_idx=1, port="COM13", baudrate=115200):
+    def __init__(self, cam_idx=1, port="COM13"):
         self.cam_idx = cam_idx
         self.port = port
-        self.baudrate = baudrate
+        self.dobot = None
+        self.connected = False
 
         print("=" * 60)
         print("DOBOT REAL PROMPT DRIVER (SINGLE TOP-CAMERA MODE)")
         print(f"Top Camera Index:   {self.cam_idx}")
-        print(f"Robot Port:         {self.port} (Baud: {self.baudrate})")
+        print(f"Robot Port:         {self.port}")
         print(f"Tag Geometry:       8.0 x 8.0 cm (1.0 cm gaps)")
         print("=" * 60)
 
         # Initialize visual tracker
         self.tracker = SingleCameraWorkspaceTracker(cam_idx=self.cam_idx)
-        # Initialize robot controller
-        self.dobot = RealDobotController(port=self.port, baudrate=self.baudrate)
+
+    def connect(self):
+        print(f"\n[Connecting] Opening communication with physical Dobot on {self.port}...")
+        try:
+            self.dobot = pydobot.Dobot(port=self.port, verbose=False)
+            self.dobot.speed(velocity=100.0, acceleration=100.0)
+            pose = self.dobot.pose()
+            self.connected = True
+            print(f"[SUCCESS] Connected to Physical Dobot!")
+            print(f"          Current Arm Pose: X={pose[0]:.1f}mm, Y={pose[1]:.1f}mm, Z={pose[2]:.1f}mm, R={pose[3]:.1f}deg\n")
+            return True
+        except Exception as e:
+            print(f"[Warning] Could not connect directly to Dobot ({e}). Operating in DRY-RUN mode.\n")
+            self.connected = False
+            return False
 
     def start(self):
-        print("\n[Connecting] Initializing Dobot controller...")
-        connected = self.dobot.connect()
-        if connected:
-            print(f"[OK] Dobot connected on {self.port}!")
-        else:
-            print(f"[Notice] Operating in Safe Emulated / Hardware-in-the-loop mode.")
+        self.connect()
 
-        print("\nSystem ready! Type natural language robot instructions.")
-        print("Examples:")
+        print("System Ready! Type your prompt or command:")
         print("  - 'pick up duck and place on plate'")
         print("  - 'move to target and grasp'")
-        print("  - 'status' (view visible camera ArUco markers)")
+        print("  - 'status' (query Top Camera ArUco tags and current robot pose)")
+        print("  - 'home' (home robot arm)")
         print("  - 'exit' or 'q' to quit\n")
 
         while True:
@@ -120,7 +124,15 @@ class DobotSingleCameraPromptDriver:
                     break
                 if prompt.lower() == "status":
                     tags = self.tracker.get_detected_tags()
-                    print(f"  [Top Camera] Currently visible ArUco Tag IDs: {list(tags.keys())}")
+                    print(f"  [Top Camera] Visible ArUco Tag IDs: {list(tags.keys())}")
+                    if self.connected:
+                        p = self.dobot.pose()
+                        print(f"  [Robot Pose] X={p[0]:.1f}, Y={p[1]:.1f}, Z={p[2]:.1f}, R={p[3]:.1f}")
+                    continue
+                if prompt.lower() == "home":
+                    if self.connected:
+                        print("  [Homing] Moving to home standby...")
+                        self.dobot.move_to(200.0, 0.0, 50.0, 0.0, wait=True)
                     continue
 
                 self.execute_user_prompt(prompt)
@@ -130,38 +142,41 @@ class DobotSingleCameraPromptDriver:
 
         print("\nShutting down controller & camera...")
         self.tracker.release()
-        if self.dobot.connected:
-            self.dobot.disconnect()
+        if self.connected and self.dobot:
+            try:
+                self.dobot.grip(False)
+                self.dobot.suck(False)
+                self.dobot.close()
+            except Exception:
+                pass
         print("Done.")
 
     def execute_user_prompt(self, prompt: str):
         print(f"\n[Planner] Interpreting Prompt: '{prompt}'")
         
-        # Real Dobot Cartesian base frame coordinate mapping (mm)
-        # Dobot base origin is (0, 0, 0)
-        # 1 cm gap to 8x8 cm tag 1 -> X = 150mm
-        # 1 cm gap to 8x8 cm tag 2 -> X = 220mm
+        # Geometry: 8x8cm tags with 1cm gap between Dobot base and first tag
         tag1_x, tag1_y = 150.0, 50.0
         tag2_x, tag2_y = 220.0, -60.0
         table_z = -45.0
         safe_z = 40.0
 
         plan = [
-            {"step": 1, "desc": "Approach hover above pickup zone", "x": tag1_x, "y": tag1_y, "z": safe_z, "grip": "open"},
-            {"step": 2, "desc": "Descend to object contact", "x": tag1_x, "y": tag1_y, "z": table_z, "grip": "open"},
-            {"step": 3, "desc": "Grip object", "x": tag1_x, "y": tag1_y, "z": table_z, "grip": "close"},
-            {"step": 4, "desc": "Ascend with object", "x": tag1_x, "y": tag1_y, "z": safe_z, "grip": "close"},
-            {"step": 5, "desc": "Transfer to target destination", "x": tag2_x, "y": tag2_y, "z": safe_z, "grip": "close"},
-            {"step": 6, "desc": "Lower object to surface", "x": tag2_x, "y": tag2_y, "z": table_z + 10.0, "grip": "close"},
-            {"step": 7, "desc": "Release and return to safe standby", "x": tag2_x, "y": tag2_y, "z": safe_z, "grip": "open"}
+            {"step": 1, "desc": "Approach hover above pickup zone", "x": tag1_x, "y": tag1_y, "z": safe_z, "grip": False},
+            {"step": 2, "desc": "Descend to object contact", "x": tag1_x, "y": tag1_y, "z": table_z, "grip": False},
+            {"step": 3, "desc": "Grip object", "x": tag1_x, "y": tag1_y, "z": table_z, "grip": True},
+            {"step": 4, "desc": "Ascend with object", "x": tag1_x, "y": tag1_y, "z": safe_z, "grip": True},
+            {"step": 5, "desc": "Transfer to target destination", "x": tag2_x, "y": tag2_y, "z": safe_z, "grip": True},
+            {"step": 6, "desc": "Lower object to surface", "x": tag2_x, "y": tag2_y, "z": table_z + 10.0, "grip": True},
+            {"step": 7, "desc": "Release and return to safe standby", "x": tag2_x, "y": tag2_y, "z": safe_z, "grip": False}
         ]
 
         print(f"[Execution] Running 7-step sequence...")
         for p in plan:
-            print(f"  Step {p['step']}/7: {p['desc']} -> [X={p['x']:.1f}, Y={p['y']:.1f}, Z={p['z']:.1f} mm] | Grip={p['grip'].upper()}")
-            if self.dobot.connected:
-                self.dobot.move_to_xyz(p["x"], p["y"], p["z"], r_deg=0.0, mode="MOVL_XYZ", wait=True)
-                self.dobot.set_gripper(p["grip"])
+            print(f"  Step {p['step']}/7: {p['desc']} -> [X={p['x']:.1f}, Y={p['y']:.1f}, Z={p['z']:.1f} mm] | Grip={'CLOSE' if p['grip'] else 'OPEN'}")
+            if self.connected:
+                self.dobot.move_to(p["x"], p["y"], p["z"], 0.0, wait=True)
+                self.dobot.grip(p["grip"])
+                self.dobot.suck(p["grip"])
             else:
                 time.sleep(0.4)
 
