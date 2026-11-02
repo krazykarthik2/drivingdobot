@@ -203,8 +203,14 @@ def train_local(data_path="real_dobot_demonstrations.pkl", epochs=3, batch_size=
                 "action": batch["action"].to(device)
             }
 
-            loss_dict = policy(model_batch)
-            loss = loss_dict["loss"] if isinstance(loss_dict, dict) else loss_dict
+            loss_output = policy(model_batch)
+            if isinstance(loss_output, tuple):
+                loss = loss_output[0]
+            elif isinstance(loss_output, dict):
+                loss = loss_output["loss"]
+            else:
+                loss = loss_output
+
             loss = loss / grad_accum_steps
             loss.backward()
 
