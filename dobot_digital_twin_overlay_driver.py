@@ -61,6 +61,13 @@ class RealDobotTwinSynchronizer:
         # 3. ArUco Marker Detector for Live Calibration
         self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
         self.aruco_params = cv2.aruco.DetectorParameters()
+        self.aruco_params.adaptiveThreshWinSizeMin = 3
+        self.aruco_params.adaptiveThreshWinSizeMax = 71
+        self.aruco_params.adaptiveThreshWinSizeStep = 2
+        self.aruco_params.adaptiveThreshConstant = 5
+        self.aruco_params.minMarkerPerimeterRate = 0.015
+        self.aruco_params.maxMarkerPerimeterRate = 5.0
+        self.aruco_params.polygonalApproxAccuracyRate = 0.07
         self.detector = cv2.aruco.ArucoDetector(self.aruco_dict, self.aruco_params)
 
         # 4. Connect to Physical Dobot
