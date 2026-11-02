@@ -57,13 +57,20 @@ def train_gpu(epochs: int = 10, batch_size: int = 8, lr: float = 3e-4):
         cams = ep["cam1"]
         T = len(actions)
 
+        # Multi-Prompt Jitter & Contrastive Synonyms
         instr_base = ep["instructions"][0] if len(ep["instructions"]) > 0 else "approach object"
         prompt_variants = [
             instr_base,
             "approach the lock",
             "move to the object",
             "reach towards the lock",
-            "approach target"
+            "approach target",
+            "hover near the lock",
+            "go to padlock",
+            "navigate to the lock on the desk",
+            "move arm towards the metal lock",
+            "reach for the target lock",
+            "track the lock"
         ]
 
         for t in range(0, T, 5):  # stride 5 for richer temporal density
