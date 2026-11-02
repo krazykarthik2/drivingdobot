@@ -393,11 +393,26 @@ class RealDobotTwinSynchronizer:
         # Query SmolVLM model directly with image and user instruction
         print(f"\n[Prompt Input]: '{prompt}'")
         raw_vlm_plan = ""
+        thought_extracted = ""
         if self.vlm is not None and cur_frame is not None:
             try:
                 print("[SmolVLM] Generating plan from visual perception and prompt...")
                 raw_vlm_plan = self.vlm.plan_subtasks(cur_frame, prompt)
-                print(f"[SmolVLM Output]:\n{raw_vlm_plan}\n")
+                
+                # Extract and format <thought> block prominently
+                import re
+                t_match = re.search(r'<thought>(.*?)</thought>', raw_vlm_plan, re.DOTALL | re.IGNORECASE)
+                if t_match:
+                    thought_extracted = t_match.group(1).strip()
+                    print("\n" + "=" * 65)
+                    print(f"[SmolVLM Thinking / Chain-of-Thought]:\n{thought_extracted}")
+                    print("=" * 65)
+                else:
+                    print(f"\n[SmolVLM Reasoning Output]:\n{raw_vlm_plan}\n")
+
+                p_match = re.search(r'<plan>(.*?)</plan>', raw_vlm_plan, re.DOTALL | re.IGNORECASE)
+                if p_match:
+                    print(f"[SmolVLM Plan]:\n{p_match.group(1).strip()}\n")
             except Exception as e:
                 print(f"[SmolVLM Warning] Inference error: {e}")
 
