@@ -10,7 +10,8 @@ os.environ['HF_HUB_OFFLINE'] = '1'
 import torch
 import numpy as np
 from PIL import Image
-from transformers import AutoProcessor, AutoModelForImageTextToText
+import threading
+from transformers import AutoProcessor, AutoModelForImageTextToText, TextIteratorStreamer
 from peft import PeftModel
 
 
@@ -40,10 +41,11 @@ class EvaluatedVisualJudge:
         print(f"[EvaluatedVisualJudge] Ready in mode='{self.mode.upper()}'!\n")
 
     @torch.no_grad()
-    def plan_subtasks(self, rgb_frame, user_goal):
+    def plan_subtasks(self, rgb_frame, user_goal, stream=True):
         """
         Plans robotic subtasks with in-context few-shot guidance to enforce
         invariance, correct reasoning, and dynamic stage counts instead of overfitting to hotspots.
+        Streams each generated token (<thought>, <plan>) directly to stdout in real-time.
         """
         pil_img = Image.fromarray(rgb_frame.astype(np.uint8))
         
@@ -91,10 +93,32 @@ class EvaluatedVisualJudge:
         ]
         text_prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True)
         inputs = self.processor(text=text_prompt, images=[pil_img], return_tensors="pt").to(self.device)
-        output_ids = self.model.generate(**inputs, max_new_tokens=180, do_sample=False)
-        generated_ids = output_ids[0][inputs["input_ids"].shape[1]:]
-        raw_res = self.processor.decode(generated_ids, skip_special_tokens=True).strip()
-        return raw_res
+
+        if stream:
+            streamer = TextIteratorStreamer(self.processor.tokenizer, skip_prompt=True, skip_special_tokens=True)
+            generation_kwargs = dict(
+                **inputs,
+                streamer=streamer,
+                max_new_tokens=140,
+                do_sample=False
+            )
+            # Run generation in a background thread so we can stream tokens simultaneously
+            gen_thread = threading.Thread(target=self.model.generate, kwargs=generation_kwargs)
+            gen_thread.start()
+
+            full_text = []
+            print("\n[SmolVLM Live Stream]: ", end="", flush=True)
+            for token_text in streamer:
+                print(token_text, end="", flush=True)
+                full_text.append(token_text)
+            gen_thread.join()
+            print("\n")
+            return "".join(full_text).strip()
+        else:
+            output_ids = self.model.generate(**inputs, max_new_tokens=140, do_sample=False)
+            generated_ids = output_ids[0][inputs["input_ids"].shape[1]:]
+            raw_res = self.processor.decode(generated_ids, skip_special_tokens=True).strip()
+            return raw_res
 
     @torch.no_grad()
     def verify_milestone(self, rgb_frame, query):
