@@ -140,18 +140,19 @@ class DobotInteractiveAligner:
         return [], None
 
     def auto_compute_homography(self, corners, ids):
-        """Automatically aligns 4 ArUco markers to the simulation world frame."""
+        """Automatically aligns 4 ArUco markers to the simulation world frame in standard orientation."""
         if ids is None or len(ids) < 2:
             print("[Auto-Align] Need at least 2 ArUco markers in view to align.")
             return
 
-        # Target Simulation Pixel Projection for:
-        # Tag 0: [402, 270], Tag 1: [237, 270], Tag 2: [245, 172], Tag 3: [394, 172]
+        # Target Simulation Pixel Projection for standard non-inverted grid:
+        # Row 0 (Top):    [Tag 0 = Top-Left: (244.3, 181.9)],   [Tag 1 = Top-Right: (394.7, 181.9)]
+        # Row 1 (Bottom): [Tag 2 = Bottom-Left: (235.8, 282.5)], [Tag 3 = Bottom-Right: (403.2, 282.5)]
         sim_coords = {
-            0: [402.1, 270.2],
-            1: [236.9, 270.2],
-            2: [245.2, 172.0],
-            3: [393.8, 172.0]
+            0: [244.3, 181.9],
+            1: [394.7, 181.9],
+            2: [235.8, 282.5],
+            3: [403.2, 282.5]
         }
 
         src_pts = []
