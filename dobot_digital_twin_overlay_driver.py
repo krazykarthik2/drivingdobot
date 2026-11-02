@@ -107,15 +107,21 @@ class RealDobotTwinSynchronizer:
         # Clear alarms on startup
         if self.connected and self.dobot:
             try:
+                # Command ID 20 (ClearAllAlarmsState)
                 m = Message()
                 m.id = 20
                 m.ctrl = 1
                 m.params = bytearray([])
                 self.dobot._send_message(m)
-                self.dobot._read_message()
+                time.sleep(0.05)
+                # Flush potential response
+                try:
+                    self.dobot._read_message()
+                except Exception:
+                    pass
                 print("[Hardware] Dobot alarms cleared successfully.")
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[Hardware Warning] Could not clear alarms: {e}")
 
         self.last_pose_query_time = time.time()
 
