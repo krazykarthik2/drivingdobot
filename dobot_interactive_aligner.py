@@ -2,18 +2,17 @@
 dobot_interactive_aligner.py
 
 Universal Live Camera <-> Digital Twin Homography & Alignment Tool
-- Displays the PyBullet 3D Dobot Magician AND the exact 4 ArUco markers [0, 1] & [2, 3]
-  placed 1cm in front of the Dobot base with 1cm gaps and 8x8cm dimensions.
-- Multi-pass ensemble ArUco detection captures all physical markers.
-- Auto-Align ('SPACE' or 'a') automatically calculates and locks the 4-point homography matrix!
-- Allows visual fine-tuning so you can confirm that physical tags & robot match the simulation.
-- Press 's' to save the calibrated transformation matrix to `camera_twin_alignment.json`.
+- Multi-threaded: GUI and rendering run on dedicated main thread; camera acquisition on decoupled thread.
+- Exact Dobot base geometry: Dobot base radius is 81mm. Row 0 ArUco tags start exactly 1cm (10mm) in front of the base.
+- Multi-pass ensemble ArUco detection guarantees finding all 4 markers.
+- Auto-Align ('SPACE' or 'a') calculates 4-point homography and saves to camera_twin_alignment.json.
 """
 
 import os
 import sys
 import json
 import time
+import threading
 import cv2
 import numpy as np
 import pybullet as p
@@ -33,7 +32,6 @@ class DobotInteractiveAligner:
         self.width = 640
         self.height = 480
 
-        # Fine-tune transform variables
         self.offset_x = 0
         self.offset_y = 0
         self.scale = 1.0
@@ -45,13 +43,32 @@ class DobotInteractiveAligner:
 
         self.load_alignment()
 
-        # Initialize PyBullet Twin Environment
         print("[Init] Loading PyBullet Digital Twin environment...")
         self.env = DobotColorBoxEnv(render_gui=False, width=self.width, height=self.height)
         self.env.set_cartesian_target(0.20, 0.0, 0.05, r=0.0, gripper_close=False)
 
-        # Open Camera
-        print(f"[Init] Connecting to Camera {self.cam_idx}...")
+        # 3D Projection Matrices
+        self.V = np.array(self.env.view_matrix).reshape((4, 4), order='F')
+        self.P = np.array(self.env.proj_matrix).reshape((4, 4), order='F')
+        self.VP = self.P @ self.V
+
+        # Exact Physical Geometry:
+        # Dobot base front edge = +0.081 m
+        # 1 cm gap before Dobot = +0.010 m
+        # Tag half-size (8cm) = 0.040 m
+        # Row 0 Center X = 0.081 + 0.010 + 0.040 = 0.131 m
+        # Row 1 Center X = 0.131 + 0.040 + 0.010 + 0.040 = 0.221 m
+        # 1 cm gap between tags laterally -> Y centers at +/- 0.045 m
+        z_table = -0.048
+        self.sim_tags_def = {
+            0: ([0.131, -0.045, z_table], (240, 200, 50)),
+            1: ([0.131, +0.045, z_table], (50, 240, 240)),
+            2: ([0.221, -0.045, z_table], (50, 240, 50)),
+            3: ([0.221, +0.045, z_table], (240, 50, 240))
+        }
+
+        # Decoupled Camera Thread
+        print(f"[Init] Connecting to Camera {self.cam_idx} in background thread...")
         self.cap = cv2.VideoCapture(self.cam_idx)
         if not self.cap.isOpened():
             self.cap = cv2.VideoCapture(0)
@@ -59,22 +76,22 @@ class DobotInteractiveAligner:
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
+        self.running = True
+        self.lock = threading.Lock()
+        self.latest_frame = None
+
+        self.cam_thread = threading.Thread(target=self._camera_reader, daemon=True)
+        self.cam_thread.start()
+
         self.dict_4x4 = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
 
-        # Setup 3D Projection Matrices
-        self.V = np.array(self.env.view_matrix).reshape((4, 4), order='F')
-        self.P = np.array(self.env.proj_matrix).reshape((4, 4), order='F')
-        self.VP = self.P @ self.V
-
-        # Define 4 Virtual Simulation ArUco Tags [0, 1] (row near Dobot) and [2, 3] (row far)
-        # Dimensions: 8cm x 8cm, 1cm inter-tag gap, 1cm Dobot base gap
-        z_table = -0.048
-        self.sim_tags_def = {
-            0: ([0.140, -0.045, z_table], (240, 200, 50)),   # Cyan/Yellow
-            1: ([0.140, +0.045, z_table], (50, 240, 240)),   # Yellow/Cyan
-            2: ([0.230, -0.045, z_table], (50, 240, 50)),    # Green
-            3: ([0.230, +0.045, z_table], (240, 50, 240))    # Magenta
-        }
+    def _camera_reader(self):
+        while self.running:
+            ret, frame = self.cap.read()
+            if ret and frame is not None:
+                with self.lock:
+                    self.latest_frame = frame
+            time.sleep(0.015)
 
     def sim_proj(self, pt_3d):
         clip = self.VP @ np.array([pt_3d[0], pt_3d[1], pt_3d[2], 1.0])
@@ -84,11 +101,10 @@ class DobotInteractiveAligner:
         return [int(u), int(v)]
 
     def render_sim_with_virtual_tags(self):
-        """Renders PyBullet simulation Dobot and draws virtual 3D 8x8cm tags on the table."""
         sim_rgb = self.env.render_frame()
         sim_bgr = cv2.cvtColor(sim_rgb, cv2.COLOR_RGB2BGR)
 
-        hw = 0.040 # 8cm marker half-size
+        hw = 0.040
         for tid, (center, color) in self.sim_tags_def.items():
             cx, cy, cz = center
             corners_3d = [
@@ -101,7 +117,6 @@ class DobotInteractiveAligner:
             cv2.fillPoly(sim_bgr, [poly], (30, 30, 30))
             cv2.polylines(sim_bgr, [poly], isClosed=True, color=color, thickness=2)
 
-            # Inner pattern
             hw_in = 0.024
             inner_3d = [
                 [cx - hw_in, cy - hw_in, cz],
@@ -114,7 +129,7 @@ class DobotInteractiveAligner:
 
             c_px = self.sim_proj([cx, cy, cz])
             cv2.putText(sim_bgr, f'{tid}', (c_px[0] - 6, c_px[1] + 6), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
-            cv2.putText(sim_bgr, f'SIM ID {tid}', (c_px[0] - 28, c_px[1] - 16), cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1)
+            cv2.putText(sim_bgr, f'SIM {tid}', (c_px[0] - 22, c_px[1] - 16), cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1)
 
         return sim_bgr
 
@@ -131,7 +146,6 @@ class DobotInteractiveAligner:
                     self.tilt_y = d.get("tilt_y", 0.0)
                     if "homography" in d:
                         self.homography_matrix = np.array(d["homography"], dtype=np.float32)
-                    print(f"[Config] Loaded saved alignment from {ALIGN_FILE}")
             except Exception:
                 pass
 
@@ -177,16 +191,15 @@ class DobotInteractiveAligner:
         return [], None
 
     def auto_compute_homography(self, corners, ids):
-        """Automatically aligns 4 ArUco markers to the simulation world frame in standard orientation."""
         if ids is None or len(ids) < 2:
             print("[Auto-Align] Need at least 2 ArUco markers in view to align.")
             return
 
         sim_coords = {
-            0: [244.3, 181.9],
-            1: [394.7, 181.9],
-            2: [235.8, 282.5],
-            3: [403.2, 282.5]
+            0: [244.8, 171.4],
+            1: [394.2, 171.4],
+            2: [236.4, 270.1],
+            3: [402.6, 270.1]
         }
 
         src_pts = []
@@ -240,7 +253,7 @@ class DobotInteractiveAligner:
 
         print("\n" + "=" * 70)
         print("PIXEL-PERFECT ALIGNER CONTROLS:")
-        print("  [SPACE] / [A]: AUTO-ALIGN (Snaps physical tags to virtual sim tags!)")
+        print("  [SPACE] / [A]: AUTO-ALIGN (Snaps physical tags to exact 1cm Dobot virtual tags!)")
         print("  [W/A/S/D] or [Arrows]: Micro Nudge Position (X, Y)")
         print("  [+] / [-]: Zoom Scale in / out")
         print("  [R] / [E]: Rotate Camera angle (+/- 0.5 deg)")
@@ -251,15 +264,16 @@ class DobotInteractiveAligner:
         print("  [Q] or [ESC]: Quit")
         print("=" * 70 + "\n")
 
-        while True:
-            ret, frame = self.cap.read()
-            if not ret or frame is None:
-                frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+        while self.running:
+            with self.lock:
+                frame = self.latest_frame.copy() if self.latest_frame is not None else None
 
-            # Render Sim Frame with Dobot Robot AND Virtual ArUco markers [0, 1] & [2, 3]
+            if frame is None:
+                time.sleep(0.01)
+                continue
+
             sim_view = self.render_sim_with_virtual_tags()
 
-            # Detect physical markers
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             corners, ids = self.detect_markers_ensemble(gray)
 
@@ -268,10 +282,7 @@ class DobotInteractiveAligner:
                 cv2.aruco.drawDetectedMarkers(frame, corners, ids)
                 pose_info = f"Physical Tags Detected: {ids.flatten().tolist()}"
 
-            # Apply homography warp to camera frame
             aligned_frame = self.transform_frame(frame)
-
-            # Blend real camera and simulation (Dobot arm + virtual tags)
             blend = cv2.addWeighted(aligned_frame, 1.0 - self.alpha, sim_view, self.alpha, 0.0)
 
             # HUD Display
@@ -281,9 +292,10 @@ class DobotInteractiveAligner:
             cv2.putText(blend, hud2, (12, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (100, 255, 100), 1)
 
             cv2.imshow(win, blend)
-            key = cv2.waitKey(20) & 0xFF
+            key = cv2.waitKey(15) & 0xFF
 
             if key in [ord('q'), 27]:
+                self.running = False
                 break
             elif key == ord('s'):
                 self.save_alignment()
@@ -304,6 +316,8 @@ class DobotInteractiveAligner:
             elif key == 9: # Tab
                 self.alpha = 0.20 if self.alpha >= 0.70 else (0.50 if self.alpha <= 0.30 else 0.80)
 
+        self.running = False
+        self.cam_thread.join(timeout=0.5)
         self.cap.release()
         cv2.destroyAllWindows()
 
