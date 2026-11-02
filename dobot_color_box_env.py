@@ -48,11 +48,12 @@ class DobotColorBoxEnv:
         p.setGravity(0, 0, -9.81)
         p.setTimeStep(1.0 / 240.0)
 
-        # Calibrated Front 45-degree elevated camera matching standard manipulation benchmarks
-        self.cam_target = [0.20, 0.0, -0.04]
-        self.cam_eye = [0.42, 0.0, 0.32]
+        # Calibrated Physical Top Camera matching real setup perspective
+        # Eye at elevated angle looking down at Dobot workspace
+        self.cam_target = [0.110, 0.001, -0.048]
+        self.cam_eye = [0.435, -0.005, 0.405]
         self.cam_up = [0.0, 0.0, 1.0]
-        self.fov = 45.0
+        self.fov = 43.5
 
         self.view_matrix = p.computeViewMatrix(
             cameraEyePosition=self.cam_eye,
@@ -61,7 +62,7 @@ class DobotColorBoxEnv:
         )
         self.proj_matrix = p.computeProjectionMatrixFOV(
             fov=self.fov,
-            aspect=1.0,
+            aspect=float(self.width) / float(self.height),
             nearVal=0.05,
             farVal=2.5
         )

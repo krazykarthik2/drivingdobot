@@ -52,19 +52,15 @@ class DobotInteractiveAligner:
         self.P = np.array(self.env.proj_matrix).reshape((4, 4), order='F')
         self.VP = self.P @ self.V
 
-        # Exact Physical Geometry:
-        # Dobot base front edge = +0.081 m
-        # 1 cm gap before Dobot = +0.010 m
-        # Tag half-size (8cm) = 0.040 m
-        # Row 0 Center X = 0.081 + 0.010 + 0.040 = 0.131 m
-        # Row 1 Center X = 0.131 + 0.040 + 0.010 + 0.040 = 0.221 m
-        # 1 cm gap between tags laterally -> Y centers at +/- 0.045 m
+        # Exact Physical Geometry & Perspective:
+        # Near Row: Tags 0 & 1
+        # Far Row: Tags 3 & 2
         z_table = -0.048
         self.sim_tags_def = {
-            0: ([0.131, -0.045, z_table], (240, 200, 50)),
-            1: ([0.131, +0.045, z_table], (50, 240, 240)),
-            2: ([0.221, -0.045, z_table], (50, 240, 50)),
-            3: ([0.221, +0.045, z_table], (240, 50, 240))
+            0: ([0.059, -0.045, z_table], (240, 200, 50)),
+            1: ([0.059, +0.045, z_table], (50, 240, 240)),
+            2: ([0.173, +0.045, z_table], (50, 240, 50)),
+            3: ([0.173, -0.045, z_table], (240, 50, 240))
         }
 
         # Decoupled Camera Thread
@@ -195,32 +191,52 @@ class DobotInteractiveAligner:
             print("[Auto-Align] Need at least 2 ArUco markers in view to align.")
             return
 
-        sim_coords = {
-            0: [244.8, 171.4],
-            1: [394.2, 171.4],
-            2: [236.4, 270.1],
-            3: [402.6, 270.1]
-        }
+        hw = 0.040
+        z_table = -0.048
+        
+        # Build 36-point constraint set: 4 corners + 4 edge midpoints + 1 center for each detected tag
+        src_all = []
+        dst_all = []
 
-        src_pts = []
-        dst_pts = []
         for i, tid in enumerate(ids.flatten()):
-            if int(tid) in sim_coords:
-                center = corners[i][0].mean(axis=0)
-                src_pts.append(center)
-                dst_pts.append(sim_coords[int(tid)])
+            t_int = int(tid)
+            if t_int in self.sim_tags_def:
+                cx, cy, cz = self.sim_tags_def[t_int][0]
+                pts_real = corners[i][0]
+                p0, p1, p2, p3 = pts_real
+                m_top = (p0 + p1) / 2.0
+                m_right = (p1 + p2) / 2.0
+                m_bot = (p2 + p3) / 2.0
+                m_left = (p3 + p0) / 2.0
+                c_real = pts_real.mean(axis=0)
+                real_9 = [p0, p1, p2, p3, m_top, m_right, m_bot, m_left, c_real]
 
-        if len(src_pts) >= 4:
-            H, _ = cv2.findHomography(np.array(src_pts, dtype=np.float32), np.array(dst_pts, dtype=np.float32))
-            self.homography_matrix = H
-            print("[Auto-Align] SUCCESS! 4-Point Homography Matrix computed and locked.")
-        elif len(src_pts) >= 2:
-            M, _ = cv2.estimateAffinePartial2D(np.array(src_pts, dtype=np.float32), np.array(dst_pts, dtype=np.float32))
+                sp0 = self.sim_proj([cx - hw, cy - hw, cz])
+                sp1 = self.sim_proj([cx - hw, cy + hw, cz])
+                sp2 = self.sim_proj([cx + hw, cy + hw, cz])
+                sp3 = self.sim_proj([cx + hw, cy - hw, cz])
+                sm_top = self.sim_proj([cx - hw, cy, cz])
+                sm_right = self.sim_proj([cx, cy + hw, cz])
+                sm_bot = self.sim_proj([cx + hw, cy, cz])
+                sm_left = self.sim_proj([cx, cy - hw, cz])
+                sc = self.sim_proj([cx, cy, cz])
+                sim_9 = [sp0, sp1, sp2, sp3, sm_top, sm_right, sm_bot, sm_left, sc]
+
+                src_all.extend(real_9)
+                dst_all.extend(sim_9)
+
+        if len(src_all) >= 4:
+            H, _ = cv2.findHomography(np.array(src_all, dtype=np.float32), np.array(dst_all, dtype=np.float32), cv2.RANSAC, 3.0)
+            if H is not None:
+                self.homography_matrix = H
+                print(f"[Auto-Align] SUCCESS! Perspective Homography Matrix computed using {len(src_all)} corner & midpoint constraints.")
+        elif len(src_all) >= 2:
+            M, _ = cv2.estimateAffinePartial2D(np.array(src_all, dtype=np.float32), np.array(dst_all, dtype=np.float32))
             if M is not None:
                 H = np.eye(3, dtype=np.float32)
                 H[:2, :] = M
                 self.homography_matrix = H
-                print("[Auto-Align] 2-Point Affine alignment calculated and locked.")
+                print("[Auto-Align] 2-Point Affine alignment calculated.")
 
     def transform_frame(self, frame):
         h, w = frame.shape[:2]
