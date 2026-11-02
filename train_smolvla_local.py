@@ -54,9 +54,14 @@ def train_local(data_path="real_dobot_demonstrations.pkl", epochs=3, batch_size=
     print(f"Loaded {len(episodes)} episodes.")
 
     transitions = []
+    chunk_size = 50
+
     for ep in episodes:
-        T = len(ep["actions"])
-        # Support flexible instructions so model generalizes across prompts
+        actions = np.array(ep["actions"], dtype=np.float32)
+        states = np.array(ep["states"], dtype=np.float32)
+        cams = ep["cam1"]
+        T = len(actions)
+
         instr_base = ep["instructions"][0] if len(ep["instructions"]) > 0 else "approach object"
         prompt_variants = [
             instr_base,
@@ -65,16 +70,25 @@ def train_local(data_path="real_dobot_demonstrations.pkl", epochs=3, batch_size=
             "reach towards the lock",
             "approach target"
         ]
-        for t in range(T):
-            # Assign variant instruction for linguistic invariance
+
+        # Slice into chunks of 50 steps (SmolVLA action horizon chunk_size)
+        for t in range(0, T, 10):
+            # Extract action sequence [t : t + chunk_size]
+            act_chunk = actions[t: t + chunk_size]
+            if len(act_chunk) < chunk_size:
+                # Pad remaining horizon with the last action
+                pad_len = chunk_size - len(act_chunk)
+                pad_act = np.tile(act_chunk[-1:], (pad_len, 1))
+                act_chunk = np.vstack([act_chunk, pad_act])
+
             chosen_instr = prompt_variants[t % len(prompt_variants)]
             transitions.append({
-                "cam1_jpg": ep["cam1"][t],
-                "state": ep["states"][t],
-                "action": ep["actions"][t],
+                "cam1_jpg": cams[t],
+                "state": states[t],
+                "action_chunk": act_chunk,
                 "instruction": chosen_instr
             })
-    print(f"Total transitions: {len(transitions)}")
+    print(f"Total chunked transitions: {len(transitions)}")
 
     # SE(2) Equivariant PyTorch Dataset (Zero Wrist Camera)
     class LocalNoWristDataset(Dataset):
@@ -89,7 +103,7 @@ def train_local(data_path="real_dobot_demonstrations.pkl", epochs=3, batch_size=
             item = self.data[idx]
             cam1 = cv2.imdecode(np.frombuffer(item["cam1_jpg"], np.uint8), cv2.IMREAD_COLOR)
             state = item["state"].copy()
-            action = item["action"].copy()
+            action = item["action_chunk"].copy()
             instr = item["instruction"]
 
             # Real-World Generalization & Robust Equivariance Augmentation:
@@ -109,7 +123,7 @@ def train_local(data_path="real_dobot_demonstrations.pkl", epochs=3, batch_size=
                     cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
                     rot_mat_2d = np.array([[cos_a, -sin_a], [sin_a, cos_a]], dtype=np.float32)
 
-                    action[:2] = rot_mat_2d @ action[:2]
+                    action[:, :2] = action[:, :2] @ rot_mat_2d.T
 
                     h, w = cam1.shape[:2]
                     # Also apply random lateral translation (+/- 25 pixels)
