@@ -138,7 +138,11 @@ class RealDobotSmolVLAController:
         ], dtype=np.float32)
 
     @torch.no_grad()
-    def predict_action(self, rgb_frame: np.ndarray, state_vector: np.ndarray):
+    def predict_action_chunk(self, rgb_frame: np.ndarray, state_vector: np.ndarray):
+        """
+        Predicts full continuous action chunk of 50 future steps from SmolVLA flow-matching.
+        Returns shape (chunk_size, 6).
+        """
         img_resized = cv2.resize(rgb_frame, (256, 256))
         img_tensor = torch.from_numpy(img_resized).permute(2, 0, 1).unsqueeze(0).float() / 255.0
         img_tensor = img_tensor.to(self.device)
@@ -167,29 +171,35 @@ class RealDobotSmolVLAController:
         else:
             act = np.array(action_tensor).squeeze()
 
-        # If action is chunked (50, 6), take the first action step
-        if act.ndim > 1:
-            act = act[0]
+        if act.ndim == 1:
+            act = np.expand_dims(act, axis=0)
         return act
 
-    def run_closed_loop(self, task="approach the lock", max_steps=40):
+    def run_closed_loop(self, task="approach the lock", max_cycles=30, ensemble_steps=8):
+        """
+        Closed-loop execution with Temporal Ensembling:
+        Executes an ensemble receding horizon of 'ensemble_steps' (e.g. 8 steps) smoothly
+        before capturing the next camera frame.
+        """
         self.set_task(task)
 
         window_title = "Real Dobot SmolVLA Closed-Loop Controller"
         cv2.namedWindow(window_title, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(window_title, 720, 540)
 
-        step = 0
-        print("\nStarting Closed-Loop Control! Press [Q] or [ESC] to stop anytime.\n")
+        total_steps = 0
+        cycle = 0
+        print(f"\nStarting Temporal Ensembled Closed-Loop Control! (Horizon={ensemble_steps} steps/cycle)")
+        print("Press [Q] or [ESC] in window to stop anytime.\n")
 
         try:
-            while step < max_steps:
+            while cycle < max_cycles:
                 ret, frame = self.cap.read()
                 if not ret or frame is None:
                     time.sleep(0.01)
                     continue
 
-                step += 1
+                cycle += 1
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
                 # Query latest pose
@@ -202,52 +212,82 @@ class RealDobotSmolVLAController:
 
                 st = self.dobot_to_so100_state(self.cur_x, self.cur_y, self.cur_z, self.gripper_closed)
 
-                # Predict continuous action from SmolVLA
+                # Predict full action chunk (50 steps)
                 t0 = time.time()
-                act = self.predict_action(rgb, st)
+                action_chunk = self.predict_action_chunk(rgb, st)
                 dt = time.time() - t0
 
-                # Map predicted SO-100 action to Dobot Cartesian target
-                # Pan maps to lateral Y; shoulder/elbow map to X/Z
-                d_pan = float(act[0])
-                d_shoulder = float(act[1])
-                d_elbow = float(act[2])
-                grip_cmd = float(act[5]) if len(act) > 5 else 15.0
+                # Temporal Ensembling: Execute the first `ensemble_steps` smoothly
+                steps_to_exec = min(ensemble_steps, len(action_chunk))
+                print(f"[Cycle {cycle:02d}/{max_cycles}] Predicted 50-step flow chunk (in {dt:.2f}s). Ensembling {steps_to_exec} steps:")
 
-                dy = float(- d_pan * 1.5)
-                dx = float((d_shoulder - 119.9) * 0.6)
-                dz = float((d_elbow - 109.8) * 0.5)
+                for s_idx in range(steps_to_exec):
+                    total_steps += 1
+                    act = action_chunk[s_idx]
 
-                # Safe physical step clipping
-                dx = np.clip(dx, -12.0, 12.0)
-                dy = np.clip(dy, -15.0, 15.0)
-                dz = np.clip(dz, -8.0, 8.0)
+                    # Relative Delta Actions: Pan maps to lateral dy, shoulder/elbow to dx/dz
+                    d_pan = float(act[0])
+                    d_shoulder = float(act[1])
+                    d_elbow = float(act[2])
+                    grip_cmd = float(act[5]) if len(act) > 5 else 15.0
 
-                target_x = float(np.clip(self.cur_x + dx, 150.0, 260.0))
-                target_y = float(np.clip(self.cur_y + dy, -120.0, 120.0))
-                target_z = float(np.clip(self.cur_z + dz, -30.0, 75.0))
+                    dy = float(- d_pan * 1.5)
+                    dx = float((d_shoulder - 119.9) * 0.6)
+                    dz = float((d_elbow - 109.8) * 0.5)
 
-                should_grip = (grip_cmd < 8.0)
+                    # Safe step bounds
+                    dx = float(np.clip(dx, -12.0, 12.0))
+                    dy = float(np.clip(dy, -15.0, 15.0))
+                    dz = float(np.clip(dz, -8.0, 8.0))
 
-                print(f"[Step {step:02d}/{max_steps}] VLA Action: Pan={d_pan:+.1f} deg | dX={dx:+.1f} dY={dy:+.1f} dZ={dz:+.1f} mm -> Target: [{target_x:.1f}, {target_y:.1f}, {target_z:.1f}] | Grip={should_grip}")
+                    target_x = float(np.clip(self.cur_x + dx, 150.0, 260.0))
+                    target_y = float(np.clip(self.cur_y + dy, -120.0, 120.0))
+                    target_z = float(np.clip(self.cur_z + dz, -30.0, 75.0))
 
-                # Drive physical arm
-                if self.connected and self.dobot:
-                    try:
-                        self.dobot.move_to(target_x, target_y, target_z, 0.0, wait=False)
-                        if should_grip != self.gripper_closed:
-                            self.gripper_closed = should_grip
-                            self.dobot.grip(self.gripper_closed)
-                            self.dobot.suck(self.gripper_closed)
-                    except Exception as e:
-                        print(f"  [Move Error]: {e}")
+                    should_grip = (grip_cmd < 8.0)
+
+                    print(f"  Step {s_idx + 1}/{steps_to_exec}: Delta=[dX={dx:+.1f}, dY={dy:+.1f}, dZ={dz:+.1f} mm] -> Target: [{target_x:.1f}, {target_y:.1f}, {target_z:.1f}] | Grip={should_grip}")
+
+                    if self.connected and self.dobot:
+                        try:
+                            self.dobot.move_to(target_x, target_y, target_z, 0.0, wait=False)
+                            if should_grip != self.gripper_closed:
+                                self.gripper_closed = should_grip
+                                self.dobot.grip(self.gripper_closed)
+                                self.dobot.suck(self.gripper_closed)
+                            # Update tracked pose
+                            p_now = self.dobot.pose()
+                            self.cur_x, self.cur_y, self.cur_z = p_now[0], p_now[1], p_now[2]
+                        except Exception as e:
+                            print(f"    [Move Error]: {e}")
+                    else:
+                        self.cur_x, self.cur_y, self.cur_z = target_x, target_y, target_z
+
+                    # Smooth 20 Hz temporal progression
+                    time.sleep(0.05)
 
                 # Telemetry HUD
                 disp = frame.copy()
                 cv2.rectangle(disp, (0, 0), (640, 45), (20, 20, 20), -1)
                 cv2.putText(disp, f"SmolVLA Goal: '{self.instruction}'", (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(disp, f"Step {step}/{max_steps} ({dt:.2f}s)", (480, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-                cv2.putText(disp, f"Target: [{target_x:.1f}, {target_y:.1f}, {target_z:.1f}] mm | Grip: {'CLOSED' if self.gripper_closed else 'OPEN'}",
+                cv2.putText(disp, f"Cycle {cycle}/{max_cycles} (Steps: {total_steps})", (430, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+                cv2.putText(disp, f"Pose: [{self.cur_x:.1f}, {self.cur_y:.1f}, {self.cur_z:.1f}] mm | Grip: {'CLOSED' if self.gripper_closed else 'OPEN'}",
+                            (15, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
+
+                cv2.imshow(window_title, disp)
+                key = cv2.waitKey(20) & 0xFF
+                if key in [27, ord('q')]:
+                    break
+
+        finally:
+            self.cap.release()
+            cv2.destroyAllWindows()
+            if self.connected and self.dobot:
+                try:
+                    self.dobot.close()
+                except Exception:
+                    pass
+            print(f"\n[Done] Closed-loop execution completed ({total_steps} smooth steps executed).")
                             (15, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
 
                 cv2.imshow(window_title, disp)
