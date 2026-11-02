@@ -261,7 +261,7 @@ class DobotHandTeachingDemonstrator:
             finally:
                 self.training_in_progress = False
 
-        t = threading.Thread(target=_train_worker, daemon=True)
+        t = threading.Thread(target=_train_worker, daemon=False)
         t.start()
 
     def run(self):
