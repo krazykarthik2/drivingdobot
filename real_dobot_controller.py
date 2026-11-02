@@ -49,9 +49,12 @@ class RealDobotController:
             dType.SetPTPCommonParams(self.api, 100, 100, isQueued=0)
             dType.SetPTPJumpParams(self.api, 20, 100, isQueued=0)
 
-            # Query initial pose
-            pose = self.get_pose()
-            print(f"[INFO] Real Dobot Initial Pose: X={pose['x']:.1f}mm, Y={pose['y']:.1f}mm, Z={pose['z']:.1f}mm, R={pose['r']:.1f}deg")
+            # Query initial pose safely without blocking
+            try:
+                pose = self.get_pose()
+                print(f"[INFO] Real Dobot Initial Pose: X={pose['x']:.1f}mm, Y={pose['y']:.1f}mm, Z={pose['z']:.1f}mm, R={pose['r']:.1f}deg")
+            except Exception as e:
+                print(f"[INFO] Initial pose read skipped ({e}), ready for movement commands.")
             return True
         else:
             err_codes = {
