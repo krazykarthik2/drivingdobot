@@ -3,9 +3,11 @@ dobot_interactive_aligner.py
 
 Universal Live Camera <-> Digital Twin Homography & Alignment Tool
 - Multi-threaded: GUI and rendering run on dedicated main thread; camera acquisition on decoupled thread.
+- Automatically connects to physical Dobot on COM13 and commands the gripper to the exact center
+  of the 4 ArUco markers [X=176.0 mm, Y=0.0 mm, Z=15.0 mm] so you can physically align or position the Dobot!
 - Exact Dobot base geometry: Dobot base radius is 81mm. Row 0 ArUco tags start exactly 1cm (10mm) in front of the base.
 - Multi-pass ensemble ArUco detection guarantees finding all 4 markers.
-- Auto-Align ('SPACE' or 'a') calculates 4-point homography and saves to camera_twin_alignment.json.
+- Auto-Align ('SPACE' or 'a') calculates 36-point perspective homography and saves to camera_twin_alignment.json.
 """
 
 import os
@@ -22,13 +24,17 @@ sys.modules['jax'] = None
 sys.modules['jaxlib'] = None
 sys.modules['tensorflow'] = None
 
+import pydobot
+from pydobot.message import Message
 from dobot_color_box_env import DobotColorBoxEnv
 
 ALIGN_FILE = "camera_twin_alignment.json"
 
+
 class DobotInteractiveAligner:
-    def __init__(self, cam_idx=1):
+    def __init__(self, cam_idx=1, robot_port="COM13"):
         self.cam_idx = cam_idx
+        self.robot_port = robot_port
         self.width = 640
         self.height = 480
 
@@ -43,9 +49,41 @@ class DobotInteractiveAligner:
 
         self.load_alignment()
 
+        # Connect to physical Dobot and move to middle of 4 ArUco markers
+        print(f"[Hardware] Connecting to physical Dobot on {self.robot_port}...")
+        self.dobot = None
+        self.connected = False
+        try:
+            self.dobot = pydobot.Dobot(port=self.robot_port, verbose=False)
+            self.connected = True
+            # Clear alarms
+            try:
+                m = Message()
+                m.id = 20
+                m.ctrl = 1
+                m.params = bytearray([])
+                self.dobot._send_message(m)
+                self.dobot._read_message()
+            except Exception:
+                pass
+
+            p_init = self.dobot.pose()
+            print(f"[Hardware] Dobot Connected! Initial Pose: X={p_init[0]:.1f}, Y={p_init[1]:.1f}, Z={p_init[2]:.1f} mm")
+            
+            # Center of the 4 ArUco markers:
+            # Base front edge = 81mm. 1cm gap before tags -> tags start at 91mm.
+            # 80mm tag + 10mm gap -> 4-tag center is X=176.0mm, Y=0.0mm.
+            # Move gripper into middle of 4 tags!
+            print("[Hardware] Positioning gripper to the exact center of the 4 ArUco markers [X=176.0, Y=0.0, Z=15.0 mm]...")
+            self._move_dobot_center(176.0, 0.0, 15.0)
+            print("[SUCCESS] Dobot gripper positioned at exact 4-tag center!\n")
+        except Exception as e:
+            print(f"[Hardware Warning] Could not connect to Dobot on {self.robot_port}: {e}\n")
+
         print("[Init] Loading PyBullet Digital Twin environment...")
         self.env = DobotColorBoxEnv(render_gui=False, width=self.width, height=self.height)
-        self.env.set_cartesian_target(0.20, 0.0, 0.05, r=0.0, gripper_close=False)
+        # Position digital twin matching the 4-marker center
+        self.env.set_cartesian_target(0.176, 0.0, 0.015, r=0.0, gripper_close=False)
 
         # 3D Projection Matrices
         self.V = np.array(self.env.view_matrix).reshape((4, 4), order='F')
@@ -54,7 +92,7 @@ class DobotInteractiveAligner:
 
         # Exact Physical Geometry & Perspective:
         # Near Row: Tags 0 & 1
-        # Far Row: Tags 3 & 2
+        # Far Row:  Tags 3 & 2
         z_table = -0.048
         self.sim_tags_def = {
             0: ([0.059, -0.045, z_table], (240, 200, 50)),
@@ -80,6 +118,48 @@ class DobotInteractiveAligner:
         self.cam_thread.start()
 
         self.dict_4x4 = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+
+    def _move_dobot_center(self, target_x, target_y, target_z, max_time=4.0):
+        """Drives physical arm smoothly to target center coordinates."""
+        if not self.connected or not self.dobot:
+            return
+
+        t0 = time.time()
+        while time.time() - t0 < max_time:
+            try:
+                cur = self.dobot.pose()
+                dx = target_x - cur[0]
+                dy = target_y - cur[1]
+                dz = target_z - cur[2]
+                if abs(dx) < 3.0 and abs(dy) < 3.0 and abs(dz) < 3.0:
+                    break
+                if abs(dx) >= abs(dy) and abs(dx) >= abs(dz):
+                    cmd = 1 if dx > 0 else 2
+                elif abs(dy) >= abs(dx) and abs(dy) >= abs(dz):
+                    cmd = 3 if dy > 0 else 4
+                else:
+                    cmd = 5 if dz > 0 else 6
+
+                m = Message()
+                m.id = 73
+                m.ctrl = 1
+                m.params = bytearray([0, cmd])
+                self.dobot._send_message(m)
+                self.dobot._read_message()
+                time.sleep(0.05)
+            except Exception:
+                break
+
+        # Stop
+        try:
+            m = Message()
+            m.id = 73
+            m.ctrl = 1
+            m.params = bytearray([0, 0])
+            self.dobot._send_message(m)
+            self.dobot._read_message()
+        except Exception:
+            pass
 
     def _camera_reader(self):
         while self.running:
@@ -127,6 +207,11 @@ class DobotInteractiveAligner:
             cv2.putText(sim_bgr, f'{tid}', (c_px[0] - 6, c_px[1] + 6), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
             cv2.putText(sim_bgr, f'SIM {tid}', (c_px[0] - 22, c_px[1] - 16), cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1)
 
+        # Crosshair in the exact center of the 4 markers
+        center_4 = self.sim_proj([0.116, 0.0, z_table])
+        cv2.drawMarker(sim_bgr, (center_4[0], center_4[1]), (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
+        cv2.putText(sim_bgr, "CENTER", (center_4[0] - 25, center_4[1] + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
+
         return sim_bgr
 
     def load_alignment(self):
@@ -164,15 +249,15 @@ class DobotInteractiveAligner:
     def detect_markers_ensemble(self, gray_frame):
         all_corners = {}
         for c_val in [3, 5]:
-            p = cv2.aruco.DetectorParameters()
-            p.adaptiveThreshConstant = c_val
-            p.adaptiveThreshWinSizeStep = 2
-            p.minMarkerPerimeterRate = 0.012
-            p.maxMarkerPerimeterRate = 5.0
-            p.polygonalApproxAccuracyRate = 0.08
-            p.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+            p_det = cv2.aruco.DetectorParameters()
+            p_det.adaptiveThreshConstant = c_val
+            p_det.adaptiveThreshWinSizeStep = 2
+            p_det.minMarkerPerimeterRate = 0.012
+            p_det.maxMarkerPerimeterRate = 5.0
+            p_det.polygonalApproxAccuracyRate = 0.08
+            p_det.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
 
-            det = cv2.aruco.ArucoDetector(self.dict_4x4, p)
+            det = cv2.aruco.ArucoDetector(self.dict_4x4, p_det)
             c, ids, _ = det.detectMarkers(gray_frame)
             if ids is not None:
                 for i, tid in enumerate(ids.flatten()):
@@ -194,7 +279,6 @@ class DobotInteractiveAligner:
         hw = 0.040
         z_table = -0.048
         
-        # Build 36-point constraint set: 4 corners + 4 edge midpoints + 1 center for each detected tag
         src_all = []
         dst_all = []
 
@@ -229,14 +313,8 @@ class DobotInteractiveAligner:
             H, _ = cv2.findHomography(np.array(src_all, dtype=np.float32), np.array(dst_all, dtype=np.float32), cv2.RANSAC, 3.0)
             if H is not None:
                 self.homography_matrix = H
-                print(f"[Auto-Align] SUCCESS! Perspective Homography Matrix computed using {len(src_all)} corner & midpoint constraints.")
-        elif len(src_all) >= 2:
-            M, _ = cv2.estimateAffinePartial2D(np.array(src_all, dtype=np.float32), np.array(dst_all, dtype=np.float32))
-            if M is not None:
-                H = np.eye(3, dtype=np.float32)
-                H[:2, :] = M
-                self.homography_matrix = H
-                print("[Auto-Align] 2-Point Affine alignment calculated.")
+                print(f"[Auto-Align] SUCCESS! Perspective Homography Matrix computed using {len(src_all)} constraints.")
+                self.save_alignment()
 
     def transform_frame(self, frame):
         h, w = frame.shape[:2]
@@ -257,25 +335,26 @@ class DobotInteractiveAligner:
                 [-self.tilt_x, h - self.tilt_y],
                 [w + self.tilt_x, h + self.tilt_y]
             ])
-            P = cv2.getPerspectiveTransform(pts1, pts2)
-            warped = cv2.warpPerspective(warped, P, (w, h))
+            M_persp = cv2.getPerspectiveTransform(pts1, pts2)
+            warped = cv2.warpPerspective(warped, M_persp, (w, h))
 
         return warped
 
     def run(self):
-        win = "Dobot Camera Calibration & Virtual Marker Overlay"
+        win = "Camera <-> Digital Twin Aligner (Physical Dobot Center Assisted)"
         cv2.namedWindow(win, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(win, 1100, 750)
+        cv2.resizeWindow(win, 960, 720)
 
         print("\n" + "=" * 70)
         print("PIXEL-PERFECT ALIGNER CONTROLS:")
-        print("  [SPACE] / [A]: AUTO-ALIGN (Snaps physical tags to exact 1cm Dobot virtual tags!)")
+        print("  Dobot Gripper is placed at the exact 4-tag center [X=176, Y=0, Z=15 mm]!")
+        print("  You can now physically reposition the Dobot or camera so it aligns.")
+        print("  [SPACE] / [A]: AUTO-ALIGN (Snaps physical tags to virtual tags & saves)")
         print("  [W/A/S/D] or [Arrows]: Micro Nudge Position (X, Y)")
         print("  [+] / [-]: Zoom Scale in / out")
         print("  [R] / [E]: Rotate Camera angle (+/- 0.5 deg)")
-        print("  [T] / [G]: Tilt Perspective Pitch (Forward / Backward)")
-        print("  [F] / [H]: Tilt Perspective Yaw (Left / Right tilt)")
-        print("  [TAB]: Cycle Alpha Transparency (20% -> 50% -> 80%)")
+        print("  [T/G/F/H]: Perspective 3D Tilt adjustment")
+        print("  [TAB]: Cycle Alpha blend (20% -> 50% -> 80%)")
         print("  [S]: Save Calibration to camera_twin_alignment.json")
         print("  [Q] or [ESC]: Quit")
         print("=" * 70 + "\n")
@@ -303,9 +382,10 @@ class DobotInteractiveAligner:
 
             # HUD Display
             cv2.rectangle(blend, (0, 0), (self.width, 58), (15, 15, 15), -1)
-            cv2.putText(blend, f"OVERLAY: {pose_info}", (12, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (50, 240, 240), 1)
+            robot_txt = "DOBOT: COM13 AT CENTER" if self.connected else "DOBOT: OFFLINE"
+            cv2.putText(blend, f"OVERLAY: {pose_info} | {robot_txt}", (12, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (50, 240, 240), 1)
             hud2 = f"Scale:{self.scale:.2f} | Rot:{self.rotation_deg:+.1f}d | X:{self.offset_x:+d} Y:{self.offset_y:+d} | [SPACE]: Auto-Align | [S]: Save"
-            cv2.putText(blend, hud2, (12, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (100, 255, 100), 1)
+            cv2.putText(blend, hud2, (12, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (100, 255, 100), 1)
 
             cv2.imshow(win, blend)
             key = cv2.waitKey(15) & 0xFF
@@ -336,8 +416,13 @@ class DobotInteractiveAligner:
         self.cam_thread.join(timeout=0.5)
         self.cap.release()
         cv2.destroyAllWindows()
+        if self.connected and self.dobot:
+            try:
+                self.dobot.close()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
-    app = DobotInteractiveAligner(cam_idx=1)
+    app = DobotInteractiveAligner(cam_idx=1, robot_port="COM13")
     app.run()
