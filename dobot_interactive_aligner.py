@@ -113,6 +113,32 @@ class DobotInteractiveAligner:
             json.dump(d, f, indent=2)
         print(f"[SUCCESS] Calibration saved to {os.path.abspath(ALIGN_FILE)}!")
 
+    def detect_markers_ensemble(self, gray_frame):
+        """Multi-pass ensemble detection to guarantee capturing all markers [0, 1, 2, 3]."""
+        all_corners = []
+        all_ids = []
+
+        for c_val in [3, 5]:
+            p = cv2.aruco.DetectorParameters()
+            p.adaptiveThreshConstant = c_val
+            p.adaptiveThreshWinSizeStep = 2
+            p.minMarkerPerimeterRate = 0.012
+            p.maxMarkerPerimeterRate = 5.0
+            p.polygonalApproxAccuracyRate = 0.08
+            p.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+
+            det = cv2.aruco.ArucoDetector(self.dict_4x4, p)
+            c, ids, _ = det.detectMarkers(gray_frame)
+            if ids is not None:
+                for i, tid in enumerate(ids.flatten()):
+                    if int(tid) not in all_ids:
+                        all_ids.append(int(tid))
+                        all_corners.append(c[i])
+
+        if all_ids:
+            return all_corners, np.array(all_ids, dtype=np.int32).reshape(-1, 1)
+        return [], None
+
     def auto_compute_homography(self, corners, ids):
         """Automatically aligns 4 ArUco markers to the simulation world frame."""
         if ids is None or len(ids) < 2:
@@ -203,9 +229,9 @@ class DobotInteractiveAligner:
             sim_rgb = self.env.render_frame()
             sim_bgr = cv2.cvtColor(sim_rgb, cv2.COLOR_RGB2BGR)
 
-            # Detect ArUco markers with robust settings
+            # Detect ArUco markers with multi-pass ensemble
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            corners, ids, _ = self.detector.detectMarkers(gray)
+            corners, ids = self.detect_markers_ensemble(gray)
 
             pose_info = "Tags: Searching..."
             if ids is not None and len(ids) > 0:
