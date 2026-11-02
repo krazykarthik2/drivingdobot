@@ -10,6 +10,12 @@ Trains SmolVLA without wrist camera locally using PyTorch.
 
 import os
 import sys
+
+# Fully enforce offline mode so HuggingFace does not attempt network connections
+os.environ['HF_HUB_OFFLINE'] = '1'
+os.environ['TRANSFORMERS_OFFLINE'] = '1'
+os.environ['HF_DATASETS_OFFLINE'] = '1'
+
 import pickle
 import numpy as np
 import cv2
@@ -151,9 +157,12 @@ def train_local(data_path="real_dobot_demonstrations.pkl", epochs=3, batch_size=
     dataset = LocalNoWristDataset(transitions, augment=True)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
-    print("\nLoading SmolVLM2 tokenizer & SmolVLA policy...")
-    tokenizer = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolVLM2-500M-Video-Instruct")
-    policy = SmolVLAPolicy.from_pretrained("lerobot/smolvla_base")
+    print("\nLoading SmolVLM2 tokenizer & SmolVLA policy from local cache...")
+    tokenizer_path = r"C:\Users\karthikkrazy\.cache\huggingface\hub\models--HuggingFaceTB--SmolVLM2-500M-Video-Instruct\snapshots\7b375e1b73b11138ff12fe22c8f2822d8fe03467"
+    policy_path = r"C:\Users\karthikkrazy\.cache\huggingface\hub\models--lerobot--smolvla_base\snapshots\c83c3163b8ca9b7e67c509fffd9121e66cb96205"
+
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, local_files_only=True)
+    policy = SmolVLAPolicy.from_pretrained(policy_path, local_files_only=True)
     policy.to(device)
 
     # Freeze vision backbone, train action flow heads
