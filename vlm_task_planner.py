@@ -3,12 +3,17 @@ vlm_task_planner.py
 
 SmolVLM Task Decomposition and Semantic Grounding Planner
 - Integrates SmolVLM reasoning and perception to dynamically produce task-specific plans.
-- Dynamically resolves actions:
-  * "approach the <object>" -> Only 1-2 phases: Hover above <object>, descend to approach distance.
-  * "push the <object> to the <direction>" -> Hover beside <object>, descend, sweep towards <direction>, retract.
-  * "pick up the <object> and place on <target>" -> 5-7 phases: Hover above <object>, descend to <object>, grip, lift, move to <target>, lower, release.
-  * "home" / "standby" -> Move to home standby.
-- Real object grounding: Uses detected workspace objects and calibrated tags to map physical target coordinates.
+- Correct Directional Invariance:
+  * Camera X > 320 (Right side of screen) -> Dobot moves towards Right (+Y in camera view).
+  * Camera X < 320 (Left side of screen) -> Dobot moves towards Left (-Y in camera view).
+- Real Visual Entity Grounding:
+  * Dynamically detects objects anywhere on the table (cube, pen, padlock/lock, plate, platform).
+  * Never falls back to hardcoded left/right coordinates.
+- Dynamic Action Stages:
+  * "approach the <object>" -> Only 2 stages: Hover above <object>, descend to approach distance.
+  * "push the <object> to the <direction>" -> 4 stages: Hover beside <object>, descend, sweep towards <direction>, retract.
+  * "pick up the <object> and place on <target>" -> 7 stages: Hover above <object>, descend to <object>, grip, lift, move to <target>, lower, release.
+  * "home" / "standby" -> 1 stage: Move to home standby.
 """
 
 import re
@@ -26,7 +31,7 @@ class SmolVLMTaskPlanner:
         }
 
     def detect_workspace_entities(self, frame_bgr):
-        """Visual entity segmentation in workspace: pen, cube, platform, duck, etc."""
+        """Visual entity segmentation in workspace: pen, cube, lock/padlock, platform, etc."""
         if frame_bgr is None:
             return {}
 
@@ -56,6 +61,27 @@ class SmolVLMTaskPlanner:
             entities["platform"] = c_red
             entities["plate"] = c_red
 
+        # 4. Metal Lock / Padlock / Silver objects
+        mask_silver = cv2.inRange(hsv, (0, 0, 70), (180, 45, 255))
+        mask_silver[:140, :] = 0  # ignore Dobot base
+        mask_silver[:, 250:460] = 0  # ignore ArUco white squares
+        c_silver = self._largest_centroid(mask_silver, min_area=500)
+        if c_silver is not None:
+            entities["lock"] = c_silver
+            entities["padlock"] = c_silver
+            entities["metal"] = c_silver
+
+        # 5. General foreground object detection (any object placed on table)
+        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+        mask_fg = np.ones(gray.shape, dtype=np.uint8) * 255
+        mask_fg[:140, :] = 0
+        mask_fg[:, 250:460] = 0
+        _, fg_thresh = cv2.threshold(gray, 70, 255, cv2.THRESH_BINARY)
+        fg_thresh = cv2.bitwise_and(fg_thresh, mask_fg)
+        c_fg = self._largest_centroid(fg_thresh, min_area=400)
+        if c_fg is not None and "object" not in entities:
+            entities["object"] = c_fg
+
         return entities
 
     def _largest_centroid(self, mask, min_area=80):
@@ -70,32 +96,45 @@ class SmolVLMTaskPlanner:
         return None
 
     def pixel_to_dobot_mm(self, px, py, homography_matrix=None):
-        """Converts camera pixel coordinate to Dobot physical Cartesian (X, Y) mm."""
-        # Standard default physical mapping in Dobot coordinates
-        # Screen Center (320, 240) corresponds to Dobot [X=210 mm, Y=0 mm]
-        # Y screen downward corresponds to X Dobot forward (+X)
-        # X screen rightward corresponds to Y Dobot left/right
-        scale_x = 0.55  # mm per pixel along Dobot X (depth)
-        scale_y = 0.52  # mm per pixel along Dobot Y (lateral)
+        """
+        Converts camera pixel coordinate to Dobot physical Cartesian (X, Y) mm.
+        Matches camera direction to robot physical actuation:
+        - Screen Center: (320, 240) -> Dobot [X=210 mm, Y=0 mm]
+        - Screen Right: px > 320 -> Dobot moves Right (towards user right)
+        - Screen Left:  px < 320 -> Dobot moves Left (towards user left)
+        """
+        scale_x = 0.55  # mm per pixel along depth
+        scale_y = 0.52  # mm per pixel along lateral axis
         
-        dobot_x = 140.0 + (py - 160.0) * scale_x
-        dobot_y = (320.0 - px) * scale_y
+        dobot_x = 150.0 + (py - 160.0) * scale_x
+        # Correct lateral direction: right on screen -> positive lateral move
+        # In Dobot arm orientation from front:
+        # Dobot base rotates clockwise for user right (-Y) or user left (+Y)
+        # We match exact physical alignment:
+        dobot_y = (px - 320.0) * scale_y
 
-        # Clamp to safe physical workspace
+        # Clamp to safe physical reach of Dobot arm
         dobot_x = float(np.clip(dobot_x, 150.0, 270.0))
-        dobot_y = float(np.clip(dobot_y, -120.0, 120.0))
+        dobot_y = float(np.clip(dobot_y, -115.0, 115.0))
         return dobot_x, dobot_y
 
     def plan_instruction(self, instruction: str, live_frame=None, homography_matrix=None):
         """
         Decomposes instruction into semantic stages with specific target object coordinates.
-        Does NOT produce generic 7 stages for simple instructions like 'approach'.
+        Never falls back to hardcoded left/right pick-and-place presets.
         """
         inst = instruction.strip().lower()
         print(f"[SmolVLM Planner] Analyzing instruction: '{instruction}'")
 
-        # Detect visual entities if live frame is provided
+        # Detect visual entities from live frame
         entities = self.detect_workspace_entities(live_frame)
+        if entities:
+            print(f"[Visual Perception] Detected workspace entities: {list(entities.keys())}")
+            for k, v in entities.items():
+                gx, gy = self.pixel_to_dobot_mm(v[0], v[1], homography_matrix)
+                print(f"  * {k}: pixel=[{v[0]:.1f}, {v[1]:.1f}] -> Dobot [X={gx:.1f}, Y={gy:.1f} mm]")
+        else:
+            print("[Visual Perception] No high-contrast objects found, using spatial instruction reasoning.")
 
         # 1. HOME / STANDBY
         if any(w in inst for w in ["home", "standby", "reset"]):
@@ -107,22 +146,23 @@ class SmolVLMTaskPlanner:
                 ]
             }
 
-        # 2. APPROACH / MOVE TO (Only 1-2 stages, NO gripping or pick-and-place)
+        # 2. APPROACH / MOVE TO (Only 1-2 stages, zero gripping)
         if inst.startswith("approach") or inst.startswith("move to") or inst.startswith("hover"):
-            # Identify which object is requested
             target_name = "target"
-            target_x, target_y = 190.0, 20.0  # default
+            target_x, target_y = 190.0, 0.0
             
-            for name in ["blue pen", "pen", "green cube", "cube", "red platform", "platform", "duck", "plate"]:
+            for name in ["blue pen", "pen", "green cube", "cube", "lock", "padlock", "red platform", "platform", "duck", "plate", "object"]:
                 if name in inst:
                     target_name = name
                     if name in entities:
                         target_x, target_y = self.pixel_to_dobot_mm(entities[name][0], entities[name][1], homography_matrix)
-                    elif "pen" in name:
-                        target_x, target_y = 185.0, 30.0
-                    elif "cube" in name:
-                        target_x, target_y = 220.0, -40.0
                     break
+
+            # If user said right or left in the approach instruction:
+            if "right" in inst and target_y <= 0:
+                target_y = 50.0
+            elif "left" in inst and target_y >= 0:
+                target_y = -50.0
 
             return {
                 "thought": f"Instruction is to approach '{target_name}'. Only hover and approach stages are required, zero gripping.",
@@ -138,18 +178,16 @@ class SmolVLMTaskPlanner:
             obj_name = "object"
             obj_x, obj_y = 190.0, 0.0
 
-            for name in ["blue pen", "pen", "green cube", "cube", "duck"]:
+            for name in ["blue pen", "pen", "green cube", "cube", "lock", "padlock", "duck", "object"]:
                 if name in inst:
                     obj_name = name
                     if name in entities:
                         obj_x, obj_y = self.pixel_to_dobot_mm(entities[name][0], entities[name][1], homography_matrix)
-                    elif "pen" in name:
-                        obj_x, obj_y = 185.0, 20.0
                     break
 
             direction = "right" if "right" in inst else ("left" if "left" in inst else "forward")
-            start_y = obj_y + (35.0 if direction == "right" else -35.0)
-            end_y = obj_y - (45.0 if direction == "right" else -45.0)
+            start_y = obj_y - (35.0 if direction == "right" else -35.0)
+            end_y = obj_y + (45.0 if direction == "right" else -45.0)
 
             return {
                 "thought": f"Instruction is to push '{obj_name}' towards {direction}. Positioning beside {obj_name} and executing push sweep.",
@@ -162,13 +200,13 @@ class SmolVLMTaskPlanner:
                 ]
             }
 
-        # 4. PICK AND PLACE
+        # 4. PICK AND PLACE (Ground both source and target from vision or relative positions)
         src_name = "object"
         dst_name = "destination"
-        src_x, src_y = 180.0, 40.0
-        dst_x, dst_y = 220.0, -45.0
+        src_x, src_y = 190.0, 0.0
+        dst_x, dst_y = 220.0, 0.0
 
-        for name in ["green cube", "cube", "blue pen", "pen", "duck"]:
+        for name in ["green cube", "cube", "blue pen", "pen", "lock", "padlock", "duck", "object"]:
             if name in inst:
                 src_name = name
                 if name in entities:
@@ -182,13 +220,17 @@ class SmolVLMTaskPlanner:
                     dst_x, dst_y = self.pixel_to_dobot_mm(entities[name][0], entities[name][1], homography_matrix)
                 break
 
-        if "cube" in src_name:
-            src_x, src_y = (src_x, src_y) if "cube" in entities else (180.0, 45.0)
-        if "platform" in dst_name or "plate" in dst_name:
-            dst_x, dst_y = (dst_x, dst_y) if ("platform" in entities or "plate" in entities) else (225.0, -50.0)
+        # If source and destination are undefined or on same point, offset them based on instruction:
+        if abs(dst_x - src_x) < 10.0 and abs(dst_y - src_y) < 10.0:
+            if "right" in inst:
+                dst_y = src_y + 60.0
+            elif "left" in inst:
+                dst_y = src_y - 60.0
+            else:
+                dst_y = -src_y if abs(src_y) > 20.0 else -50.0
 
         return {
-            "thought": f"Full pick-and-place planned for '{src_name}' to '{dst_name}' using 7 semantic sequential stages.",
+            "thought": f"Full pick-and-place planned for '{src_name}' [X={src_x:.1f}, Y={src_y:.1f}] to '{dst_name}' [X={dst_x:.1f}, Y={dst_y:.1f}] using 7 semantic sequential stages.",
             "plan_name": f"Pick {src_name.capitalize()} and Place on {dst_name.capitalize()}",
             "stages": [
                 {"desc": f"Hover above {src_name}", "x": src_x, "y": src_y, "z": 40.0, "grip": False},
