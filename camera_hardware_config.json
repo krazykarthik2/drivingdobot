@@ -1,10 +1,10 @@
 {
   "camera_1": {
-    "name": "Front 45-degree Overhead Camera",
-    "pnp_name": "USB Camera",
-    "hardware_id": "USB\\VID_4C4A&PID_4A55&MI_00",
-    "opencv_index": 0,
-    "role": "Global workspace monitoring & target tracking",
+    "name": "Zebronics External Camera (Straight / Front Overhead)",
+    "pnp_name": "MJPEG Camera",
+    "opencv_index": 3,
+    "backend": "CAP_DSHOW",
+    "role": "Straight overhead view of Dobot workspace",
     "default_res": [
       640,
       480
@@ -12,11 +12,11 @@
     "fps": 30
   },
   "camera_2": {
-    "name": "Side Lateral Profile Camera",
-    "pnp_name": "HD camera",
-    "hardware_id": "USB\\VID_349C&PID_2317&MI_00",
-    "opencv_index": 1,
-    "role": "Z-depth descent & gripper contact alignment",
+    "name": "USB Camera (Lateral / Side Profile)",
+    "pnp_name": "USB Camera",
+    "opencv_index": 2,
+    "backend": "CAP_DSHOW",
+    "role": "Lateral side profile view (Z-depth & gripper alignment)",
     "default_res": [
       640,
       480
