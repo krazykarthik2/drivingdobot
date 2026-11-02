@@ -106,7 +106,12 @@ class RealDobotTwinSynchronizer:
             print(f"[Warning] Dobot connection failed ({e}). Operating in DRY-RUN mode.\n")
             self.connected = False
 
-        # 4. Robot motion background task queue
+        # 4. ArUco Marker Ensemble Detection for Instant Self-Recalibration ('r')
+        self.dict_4x4 = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+        self.recalib_status_msg = ""
+        self.recalib_status_time = 0
+
+        # 5. Robot motion background task queue
         self.motion_queue = queue.Queue()
         self.current_action_status = "Ready / Standby"
         self.robot_thread = threading.Thread(target=self._robot_worker_loop, daemon=True)
@@ -176,6 +181,91 @@ class RealDobotTwinSynchronizer:
             cv2.putText(sim_bgr, f'SIM {tid}', (c_px[0] - 22, c_px[1] - 14), cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1)
 
         return sim_bgr
+
+    def detect_markers_ensemble(self, gray_frame):
+        """Multi-pass adaptive thresholding to detect all physical ArUco markers under varying lighting."""
+        all_corners = {}
+        for c_val in [3, 5]:
+            params = cv2.aruco.DetectorParameters()
+            params.adaptiveThreshConstant = c_val
+            params.adaptiveThreshWinSizeStep = 2
+            params.minMarkerPerimeterRate = 0.012
+            params.maxMarkerPerimeterRate = 5.0
+            params.polygonalApproxAccuracyRate = 0.08
+            params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+
+            det = cv2.aruco.ArucoDetector(self.dict_4x4, params)
+            c, ids, _ = det.detectMarkers(gray_frame)
+            if ids is not None:
+                for i, tid in enumerate(ids.flatten()):
+                    if int(tid) not in all_corners:
+                        all_corners[int(tid)] = c[i]
+
+        if all_corners:
+            sorted_items = sorted(all_corners.items())
+            c_list = [item[1] for item in sorted_items]
+            ids_arr = np.array([item[0] for item in sorted_items], dtype=np.int32).reshape(-1, 1)
+            return c_list, ids_arr
+        return [], None
+
+    def recalibrate_self(self, raw_frame):
+        """Auto-recalibrates homography using 36 corner & midpoint constraints from live camera feed."""
+        gray = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2GRAY)
+        corners, ids = self.detect_markers_ensemble(gray)
+
+        if ids is None or len(ids) < 2:
+            self.recalib_status_msg = f"Recalibrate failed: only {0 if ids is None else len(ids)} tags found"
+            self.recalib_status_time = time.time()
+            print(f"[Recalibrate] {self.recalib_status_msg}")
+            return False
+
+        hw = 0.040
+        z_table = -0.048
+        src_all = []
+        dst_all = []
+
+        for i, tid in enumerate(ids.flatten()):
+            t_int = int(tid)
+            if t_int in self.sim_tags_def:
+                cx, cy, cz = self.sim_tags_def[t_int][0]
+                pts_real = corners[i][0]
+                p0, p1, p2, p3 = pts_real
+                m_top = (p0 + p1) / 2.0
+                m_right = (p1 + p2) / 2.0
+                m_bot = (p2 + p3) / 2.0
+                m_left = (p3 + p0) / 2.0
+                c_real = pts_real.mean(axis=0)
+                real_9 = [p0, p1, p2, p3, m_top, m_right, m_bot, m_left, c_real]
+
+                sp0 = self.sim_proj([cx - hw, cy - hw, cz])
+                sp1 = self.sim_proj([cx - hw, cy + hw, cz])
+                sp2 = self.sim_proj([cx + hw, cy + hw, cz])
+                sp3 = self.sim_proj([cx + hw, cy - hw, cz])
+                sm_top = self.sim_proj([cx - hw, cy, cz])
+                sm_right = self.sim_proj([cx, cy + hw, cz])
+                sm_bot = self.sim_proj([cx + hw, cy, cz])
+                sm_left = self.sim_proj([cx, cy - hw, cz])
+                sc = self.sim_proj([cx, cy, cz])
+                sim_9 = [sp0, sp1, sp2, sp3, sm_top, sm_right, sm_bot, sm_left, sc]
+
+                src_all.extend(real_9)
+                dst_all.extend(sim_9)
+
+        if len(src_all) >= 4:
+            H, _ = cv2.findHomography(np.array(src_all, dtype=np.float32), np.array(dst_all, dtype=np.float32), cv2.RANSAC, 3.0)
+            if H is not None:
+                self.homography_matrix = H
+                self.alignment_params["homography"] = H.tolist()
+                try:
+                    with open("camera_twin_alignment.json", "w") as f:
+                        json.dump(self.alignment_params, f, indent=2)
+                except Exception:
+                    pass
+                self.recalib_status_msg = f"Self-Recalibrated ({len(ids)} tags, {len(src_all)} pts)"
+                self.recalib_status_time = time.time()
+                print(f"[SUCCESS] {self.recalib_status_msg} and saved to camera_twin_alignment.json!")
+                return True
+        return False
 
     def _sync_twin_to_real(self, x_mm, y_mm, z_mm, r_deg=0.0, grip=False):
         """Drives virtual PyBullet twin to match physical coordinates."""
@@ -385,11 +475,13 @@ class RealDobotTwinSynchronizer:
                 fps_actual = 0.9 * fps_actual + 0.1 * (1.0 / dt)
 
             # 6. Status and Telemetry HUD
-            cv2.rectangle(overlay, (0, 0), (overlay.shape[1], 48), (20, 20, 20), -1)
+            cv2.rectangle(overlay, (0, 0), (overlay.shape[1], 50), (20, 20, 20), -1)
             status_txt = "HARDWARE: ONLINE (COM13)" if self.connected else "HARDWARE: DRY-RUN"
             color_txt = (40, 230, 40) if self.connected else (40, 180, 240)
-            cv2.putText(overlay, f"TWIN OVERLAY (Real + Sim) | {status_txt} | {fps_actual:.1f} FPS", (15, 22),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, color_txt, 2)
+            
+            recalib_note = f" | [{self.recalib_status_msg}]" if (time.time() - self.recalib_status_time < 3.0) else " | Press 'r': Recalibrate"
+            cv2.putText(overlay, f"TWIN OVERLAY (Real + Sim) | {status_txt} | {fps_actual:.1f} FPS{recalib_note}", (15, 22),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.52, color_txt, 2)
             cv2.putText(overlay, f"ACTION: {self.current_action_status} | POSE: X={p_cur[0]:.1f}, Y={p_cur[1]:.1f}, Z={p_cur[2]:.1f}",
                         (15, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (220, 220, 220), 1)
 
@@ -398,6 +490,10 @@ class RealDobotTwinSynchronizer:
             if key == ord('q') or key == 27:
                 self.running = False
                 break
+            elif key == ord('r'):
+                # Self-recalibrate on demand from raw camera frame
+                print("\n[User Input] 'r' pressed in window: Initiating self-recalibration...")
+                self.recalibrate_self(frame)
             elif key == 9: # TAB cycles blend transparency (20% -> 50% -> 80%)
                 self.blend_alpha = 0.20 if self.blend_alpha >= 0.70 else (0.50 if self.blend_alpha <= 0.30 else 0.80)
 
