@@ -1,10 +1,17 @@
 {
-  "x_mm": 420,
-  "y_mm": 0,
-  "z_mm": 320,
-  "yaw_deg": 180.0,
-  "pitch_deg": -45.0,
-  "roll_deg": 0.0,
-  "fov": 45.0,
-  "alpha": 45
+  "timestamp": 1793605369.6212296,
+  "marker_size_m": 0.08,
+  "dobot_gap_m": 0.01,
+  "inter_tag_gap_m": 0.01,
+  "camera_top": {
+    "index": 1,
+    "backend": "MSMF",
+    "fps": 66.80636478027492
+  },
+  "camera_side": {
+    "index": 2,
+    "backend": "DSHOW",
+    "fps": 66.80636478027492
+  },
+  "calibrated": true
 }
