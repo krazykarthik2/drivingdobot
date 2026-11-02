@@ -1,0 +1,274 @@
+"""
+run_real_dobot_smolvla.py
+
+End-to-End Real-World Closed-Loop Physical Dobot Magician Control:
+- Uses the newly fine-tuned SmolVLA policy (smolvla_no_wrist_dobot/smolvla_no_wrist_heads.pt)
+  trained directly on your physical tabletop demonstrations.
+- ZERO synthetic visual judges, ZERO heuristic handholding, ZERO discrete bounding boxes.
+- Direct closed-loop motor control:
+  * Top Camera (Index 1) captures live workspace frames (DirectShow backend).
+  * SmolVLA flow-matching predicts continuous 6D action chunks.
+  * Real Dobot executes smooth trajectory towards the physical object.
+- Safe 115200 baud serial communication with automatic startup alarm clearance.
+"""
+
+import os
+import sys
+import time
+import cv2
+import numpy as np
+import torch
+
+# Compatibility stubs
+sys.modules['jax'] = None
+sys.modules['jaxlib'] = None
+sys.modules['tensorflow'] = None
+os.environ['HF_HUB_OFFLINE'] = '1'
+
+import pydobot
+from pydobot.message import Message
+from transformers import AutoTokenizer
+from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
+from dobot_kinematics import DobotKinematics
+
+
+class RealDobotSmolVLAController:
+    def __init__(self, cam_idx=1, robot_port="COM13", heads_path="smolvla_no_wrist_dobot/smolvla_no_wrist_heads.pt"):
+        print("=" * 70)
+        print("REAL PHYSICAL DOBOT MAGICIAN CLOSED-LOOP SMOLVLA CONTROLLER")
+        print("=" * 70)
+
+        self.device = torch.device("cpu")
+        self.kin = DobotKinematics()
+
+        # 1. Camera Initialization with DirectShow
+        print(f"[1/3] Connecting to Top Camera (Index {cam_idx})...")
+        self.cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW)
+        if not self.cap.isOpened():
+            self.cap = cv2.VideoCapture(cam_idx)
+        if not self.cap.isOpened():
+            self.cap = cv2.VideoCapture(0)
+
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+        # 2. Dobot Hardware Connection
+        print(f"[2/3] Connecting to Physical Dobot on {robot_port}...")
+        self.dobot = None
+        self.connected = False
+        self.cur_x, self.cur_y, self.cur_z = 190.0, 0.0, 40.0
+        self.gripper_closed = False
+
+        try:
+            self.dobot = pydobot.Dobot(port=robot_port, verbose=False)
+            # Reliable alarm clearance on startup
+            m = Message()
+            m.id = 20
+            m.ctrl = 1
+            m.params = bytearray([])
+            self.dobot._send_message(m)
+            time.sleep(0.05)
+            try:
+                self.dobot._read_message()
+            except Exception:
+                pass
+
+            p_init = self.dobot.pose()
+            self.cur_x, self.cur_y, self.cur_z = p_init[0], p_init[1], p_init[2]
+            self.connected = True
+            print(f"[Dobot] Connected successfully! Pose: [{self.cur_x:.1f}, {self.cur_y:.1f}, {self.cur_z:.1f}] mm\n")
+        except Exception as e:
+            print(f"[Dobot Warning] Could not connect to {robot_port} ({e}). Running in DRY-RUN mode.\n")
+
+        # 3. Load Fine-Tuned SmolVLA Policy
+        print(f"[3/3] Loading Fine-Tuned SmolVLA Policy from {heads_path}...")
+        tok_path = r"C:\Users\karthikkrazy\.cache\huggingface\hub\models--HuggingFaceTB--SmolVLM2-500M-Video-Instruct\snapshots\7b375e1b73b11138ff12fe22c8f2822d8fe03467"
+        pol_path = r"C:\Users\karthikkrazy\.cache\huggingface\hub\models--lerobot--smolvla_base\snapshots\c83c3163b8ca9b7e67c509fffd9121e66cb96205"
+
+        self.tokenizer = AutoTokenizer.from_pretrained(tok_path, local_files_only=True)
+        self.policy = SmolVLAPolicy.from_pretrained(pol_path, local_files_only=True)
+
+        if os.path.exists(heads_path):
+            print(f"[SmolVLA] Injecting real-demonstration trained flow-matching heads from {heads_path}...")
+            heads = torch.load(heads_path, map_location=self.device)
+            self.policy.model.state_proj.load_state_dict(heads["state_proj"])
+            self.policy.model.action_in_proj.load_state_dict(heads["action_in_proj"])
+            self.policy.model.action_out_proj.load_state_dict(heads["action_out_proj"])
+            self.policy.model.action_time_mlp_in.load_state_dict(heads["action_time_mlp_in"])
+            self.policy.model.action_time_mlp_out.load_state_dict(heads["action_time_mlp_out"])
+            print("[SmolVLA] Real-world trained heads loaded successfully!")
+
+        self.policy.to(self.device)
+        self.policy.eval()
+
+        self.instruction = ""
+        self.input_ids = None
+        self.attention_mask = None
+
+    def set_task(self, instruction_text: str):
+        self.instruction = instruction_text
+        self.policy.reset()
+        tokens = self.tokenizer(
+            instruction_text,
+            return_tensors="pt",
+            padding="max_length",
+            max_length=48,
+            truncation=True
+        )
+        self.input_ids = tokens["input_ids"].to(self.device)
+        self.attention_mask = tokens["attention_mask"].bool().to(self.device)
+        print(f"\n[Task Active]: '{self.instruction}'")
+
+    def dobot_to_so100_state(self, x_mm, y_mm, z_mm, is_grip_closed):
+        x_m, y_m, z_m = x_mm / 1000.0, y_mm / 1000.0, z_mm / 1000.0
+        try:
+            inv = self.kin.inverse(x_m, y_m, z_m)
+            pan_so100 = float(- np.rad2deg(inv[0]) / 2.45)
+        except Exception:
+            pan_so100 = 0.0
+
+        return np.array([
+            pan_so100,
+            119.9,
+            109.8,
+            56.7,
+            -27.4,
+            3.0 if is_grip_closed else 15.0
+        ], dtype=np.float32)
+
+    @torch.no_grad()
+    def predict_action(self, rgb_frame: np.ndarray, state_vector: np.ndarray):
+        img_resized = cv2.resize(rgb_frame, (256, 256))
+        img_tensor = torch.from_numpy(img_resized).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+        img_tensor = img_tensor.to(self.device)
+
+        zero_tensor = torch.zeros_like(img_tensor)
+        state_tensor = torch.from_numpy(state_vector.astype(np.float32)).unsqueeze(0).to(self.device)
+
+        batch = {
+            "observation.state": state_tensor,
+            "observation.images.camera1": img_tensor,
+            "observation.images.camera2": zero_tensor,
+            "observation.images.camera3": zero_tensor,
+            "observation.language.tokens": self.input_ids,
+            "observation.language.attention_mask": self.attention_mask,
+        }
+
+        proj_dtype = self.policy.model.action_in_proj.weight.dtype
+        noise = torch.zeros(
+            1, self.policy.config.chunk_size, self.policy.config.max_action_dim,
+            device=self.device, dtype=proj_dtype
+        )
+
+        action_tensor = self.policy.select_action(batch, noise=noise)
+        if isinstance(action_tensor, torch.Tensor):
+            act = action_tensor.detach().cpu().numpy().squeeze()
+        else:
+            act = np.array(action_tensor).squeeze()
+
+        # If action is chunked (50, 6), take the first action step
+        if act.ndim > 1:
+            act = act[0]
+        return act
+
+    def run_closed_loop(self, task="approach the lock", max_steps=40):
+        self.set_task(task)
+
+        window_title = "Real Dobot SmolVLA Closed-Loop Controller"
+        cv2.namedWindow(window_title, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(window_title, 720, 540)
+
+        step = 0
+        print("\nStarting Closed-Loop Control! Press [Q] or [ESC] to stop anytime.\n")
+
+        try:
+            while step < max_steps:
+                ret, frame = self.cap.read()
+                if not ret or frame is None:
+                    time.sleep(0.01)
+                    continue
+
+                step += 1
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+                # Query latest pose
+                if self.connected and self.dobot:
+                    try:
+                        p = self.dobot.pose()
+                        self.cur_x, self.cur_y, self.cur_z = p[0], p[1], p[2]
+                    except Exception:
+                        pass
+
+                st = self.dobot_to_so100_state(self.cur_x, self.cur_y, self.cur_z, self.gripper_closed)
+
+                # Predict continuous action from SmolVLA
+                t0 = time.time()
+                act = self.predict_action(rgb, st)
+                dt = time.time() - t0
+
+                # Map predicted SO-100 action to Dobot Cartesian target
+                # Pan maps to lateral Y; shoulder/elbow map to X/Z
+                d_pan = float(act[0])
+                d_shoulder = float(act[1])
+                d_elbow = float(act[2])
+                grip_cmd = float(act[5]) if len(act) > 5 else 15.0
+
+                dy = float(- d_pan * 1.5)
+                dx = float((d_shoulder - 119.9) * 0.6)
+                dz = float((d_elbow - 109.8) * 0.5)
+
+                # Safe physical step clipping
+                dx = np.clip(dx, -12.0, 12.0)
+                dy = np.clip(dy, -15.0, 15.0)
+                dz = np.clip(dz, -8.0, 8.0)
+
+                target_x = float(np.clip(self.cur_x + dx, 150.0, 260.0))
+                target_y = float(np.clip(self.cur_y + dy, -120.0, 120.0))
+                target_z = float(np.clip(self.cur_z + dz, -30.0, 75.0))
+
+                should_grip = (grip_cmd < 8.0)
+
+                print(f"[Step {step:02d}/{max_steps}] VLA Action: Pan={d_pan:+.1f} deg | dX={dx:+.1f} dY={dy:+.1f} dZ={dz:+.1f} mm -> Target: [{target_x:.1f}, {target_y:.1f}, {target_z:.1f}] | Grip={should_grip}")
+
+                # Drive physical arm
+                if self.connected and self.dobot:
+                    try:
+                        self.dobot.move_to(target_x, target_y, target_z, 0.0, wait=False)
+                        if should_grip != self.gripper_closed:
+                            self.gripper_closed = should_grip
+                            self.dobot.grip(self.gripper_closed)
+                            self.dobot.suck(self.gripper_closed)
+                    except Exception as e:
+                        print(f"  [Move Error]: {e}")
+
+                # Telemetry HUD
+                disp = frame.copy()
+                cv2.rectangle(disp, (0, 0), (640, 45), (20, 20, 20), -1)
+                cv2.putText(disp, f"SmolVLA Goal: '{self.instruction}'", (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                cv2.putText(disp, f"Step {step}/{max_steps} ({dt:.2f}s)", (480, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+                cv2.putText(disp, f"Target: [{target_x:.1f}, {target_y:.1f}, {target_z:.1f}] mm | Grip: {'CLOSED' if self.gripper_closed else 'OPEN'}",
+                            (15, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
+
+                cv2.imshow(window_title, disp)
+                key = cv2.waitKey(40) & 0xFF
+                if key in [27, ord('q')]:
+                    break
+
+        finally:
+            self.cap.release()
+            cv2.destroyAllWindows()
+            if self.connected and self.dobot:
+                try:
+                    self.dobot.close()
+                except Exception:
+                    pass
+            print(f"\n[Done] Closed-loop execution completed after {step} steps.")
+
+
+if __name__ == "__main__":
+    task_goal = "approach the lock"
+    if len(sys.argv) > 1:
+        task_goal = " ".join(sys.argv[1:])
+    controller = RealDobotSmolVLAController()
+    controller.run_closed_loop(task=task_goal)
