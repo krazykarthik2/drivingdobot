@@ -56,12 +56,23 @@ def train_local(data_path="real_dobot_demonstrations.pkl", epochs=3, batch_size=
     transitions = []
     for ep in episodes:
         T = len(ep["actions"])
+        # Support flexible instructions so model generalizes across prompts
+        instr_base = ep["instructions"][0] if len(ep["instructions"]) > 0 else "approach object"
+        prompt_variants = [
+            instr_base,
+            "approach the lock",
+            "move to the object",
+            "reach towards the lock",
+            "approach target"
+        ]
         for t in range(T):
+            # Assign variant instruction for linguistic invariance
+            chosen_instr = prompt_variants[t % len(prompt_variants)]
             transitions.append({
                 "cam1_jpg": ep["cam1"][t],
                 "state": ep["states"][t],
                 "action": ep["actions"][t],
-                "instruction": ep["instructions"][t]
+                "instruction": chosen_instr
             })
     print(f"Total transitions: {len(transitions)}")
 
@@ -81,18 +92,33 @@ def train_local(data_path="real_dobot_demonstrations.pkl", epochs=3, batch_size=
             action = item["action"].copy()
             instr = item["instruction"]
 
-            # SE(2) Continuous Rotational Equivariance Augmentation
-            if self.augment and np.random.rand() > 0.3:
-                angle_deg = np.random.uniform(-30.0, 30.0)
-                angle_rad = np.deg2rad(angle_deg)
-                cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
-                rot_mat_2d = np.array([[cos_a, -sin_a], [sin_a, cos_a]], dtype=np.float32)
+            # Real-World Generalization & Robust Equivariance Augmentation:
+            # 1. Random photometric noise (brightness, contrast, gamma)
+            # 2. Random horizontal/lateral shift + rotation to generalize anywhere on desk
+            if self.augment:
+                # Color jitter
+                if np.random.rand() > 0.4:
+                    alpha = np.random.uniform(0.8, 1.2) # contrast
+                    beta = np.random.uniform(-20, 20)   # brightness
+                    cam1 = np.clip(cam1 * alpha + beta, 0, 255).astype(np.uint8)
 
-                action[:2] = rot_mat_2d @ action[:2]
+                # SE(2) Continuous Rotational & Spatial Equivariance
+                if np.random.rand() > 0.2:
+                    angle_deg = np.random.uniform(-35.0, 35.0)
+                    angle_rad = np.deg2rad(angle_deg)
+                    cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
+                    rot_mat_2d = np.array([[cos_a, -sin_a], [sin_a, cos_a]], dtype=np.float32)
 
-                h, w = cam1.shape[:2]
-                M = cv2.getRotationMatrix2D((w / 2, h / 2), angle_deg, 1.0)
-                cam1 = cv2.warpAffine(cam1, M, (w, h), borderMode=cv2.BORDER_REFLECT)
+                    action[:2] = rot_mat_2d @ action[:2]
+
+                    h, w = cam1.shape[:2]
+                    # Also apply random lateral translation (+/- 25 pixels)
+                    dx_t = np.random.uniform(-25.0, 25.0)
+                    dy_t = np.random.uniform(-15.0, 15.0)
+                    M = cv2.getRotationMatrix2D((w / 2, h / 2), angle_deg, 1.0)
+                    M[0, 2] += dx_t
+                    M[1, 2] += dy_t
+                    cam1 = cv2.warpAffine(cam1, M, (w, h), borderMode=cv2.BORDER_REFLECT)
 
             t_cam1 = torch.from_numpy(cam1).permute(2, 0, 1).float() / 255.0
             t_zero = torch.zeros_like(t_cam1)
