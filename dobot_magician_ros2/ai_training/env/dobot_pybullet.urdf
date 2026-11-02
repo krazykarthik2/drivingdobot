@@ -9,13 +9,13 @@
     <visual>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="C:\Users\karthikkrazy\Downloads\simplestrobotmodel\dobot_magician_ros2\dobot_description\meshes\dae/magicianBase.dae"/>
+        <mesh filename="../../dobot_description/meshes/dae/magicianBase.dae"/>
       </geometry>
     </visual>
     <collision>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="C:\Users\karthikkrazy\Downloads\simplestrobotmodel\dobot_magician_ros2\dobot_description\meshes\dae/magicianBase.dae"/>
+        <mesh filename="../../dobot_description/meshes/dae/magicianBase.dae"/>
       </geometry>
     </collision>
   </link>
@@ -31,13 +31,13 @@
     <visual>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="C:\Users\karthikkrazy\Downloads\simplestrobotmodel\dobot_magician_ros2\dobot_description\meshes\dae/magicianLink1.dae"/>
+        <mesh filename="../../dobot_description/meshes/dae/magicianLink1.dae"/>
       </geometry>
     </visual>
     <collision>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="C:\Users\karthikkrazy\Downloads\simplestrobotmodel\dobot_magician_ros2\dobot_description\meshes\dae/magicianLink1.dae"/>
+        <mesh filename="../../dobot_description/meshes/dae/magicianLink1.dae"/>
       </geometry>
     </collision>
   </link>
@@ -53,13 +53,13 @@
     <visual>
       <origin rpy="0 -0.3490658503988659 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="C:\Users\karthikkrazy\Downloads\simplestrobotmodel\dobot_magician_ros2\dobot_description\meshes\dae/magicianLink2.dae"/>
+        <mesh filename="../../dobot_description/meshes/dae/magicianLink2.dae"/>
       </geometry>
     </visual>
     <collision>
       <origin rpy="0 -0.3490658503988659 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="C:\Users\karthikkrazy\Downloads\simplestrobotmodel\dobot_magician_ros2\dobot_description\meshes\dae/magicianLink2.dae"/>
+        <mesh filename="../../dobot_description/meshes/dae/magicianLink2.dae"/>
       </geometry>
     </collision>
   </link>
@@ -75,13 +75,13 @@
     <visual>
       <origin rpy="0 -0.47123889803846897 0" xyz="0.01645236135969491 0 -0.13399373047157848"/>
       <geometry>
-        <mesh filename="C:\Users\karthikkrazy\Downloads\simplestrobotmodel\dobot_magician_ros2\dobot_description\meshes\dae/magicianLink3.dae"/>
+        <mesh filename="../../dobot_description/meshes/dae/magicianLink3.dae"/>
       </geometry>
     </visual>
     <collision>
       <origin rpy="0 -0.47123889803846897 0" xyz="0.01645236135969491 0 -0.13399373047157848"/>
       <geometry>
-        <mesh filename="C:\Users\karthikkrazy\Downloads\simplestrobotmodel\dobot_magician_ros2\dobot_description\meshes\dae/magicianLink3.dae"/>
+        <mesh filename="../../dobot_description/meshes/dae/magicianLink3.dae"/>
       </geometry>
     </collision>
   </link>
@@ -120,13 +120,13 @@
     <visual>
       <origin rpy="0 0 0" xyz="-0.17715067840465534 0 -0.058595107267811"/>
       <geometry>
-        <mesh filename="C:\Users\karthikkrazy\Downloads\simplestrobotmodel\dobot_magician_ros2\dobot_description\meshes\dae/magicianLink4.dae"/>
+        <mesh filename="../../dobot_description/meshes/dae/magicianLink4.dae"/>
       </geometry>
     </visual>
     <collision>
       <origin rpy="0 0 0" xyz="-0.17715067840465534 0 -0.058595107267811"/>
       <geometry>
-        <mesh filename="C:\Users\karthikkrazy\Downloads\simplestrobotmodel\dobot_magician_ros2\dobot_description\meshes\dae/magicianLink4.dae"/>
+        <mesh filename="../../dobot_description/meshes/dae/magicianLink4.dae"/>
       </geometry>
     </collision>
   </link>
@@ -143,13 +143,13 @@
     <visual>
       <origin rpy="0 0 0" xyz="-8.06784046553505e-05 0 -0.027843407267811"/>
       <geometry>
-        <mesh filename="C:\Users\karthikkrazy\Downloads\simplestrobotmodel\dobot_magician_ros2\dobot_description\meshes\dae/gripper_core.dae"/>
+        <mesh filename="../../dobot_description/meshes/dae/gripper_core.dae"/>
       </geometry>
     </visual>
     <collision>
       <origin rpy="0 0 0" xyz="-8.06784046553505e-05 0 -0.027843407267811"/>
       <geometry>
-        <mesh filename="C:\Users\karthikkrazy\Downloads\simplestrobotmodel\dobot_magician_ros2\dobot_description\meshes\dae/gripper_core.dae"/>
+        <mesh filename="../../dobot_description/meshes/dae/gripper_core.dae"/>
       </geometry>
     </collision>
   </link>
@@ -165,13 +165,13 @@
     <visual>
       <origin rpy="0 0 0" xyz="-8.06784046553505e-05 -0.0009 -0.027843407267811"/>
       <geometry>
-        <mesh filename="C:\Users\karthikkrazy\Downloads\simplestrobotmodel\dobot_magician_ros2\dobot_description\meshes\dae/jaw_left.dae"/>
+        <mesh filename="../../dobot_description/meshes/dae/jaw_left.dae"/>
       </geometry>
     </visual>
     <collision>
       <origin rpy="0 0 0" xyz="-8.06784046553505e-05 -0.0009 -0.027843407267811"/>
       <geometry>
-        <mesh filename="C:\Users\karthikkrazy\Downloads\simplestrobotmodel\dobot_magician_ros2\dobot_description\meshes\dae/jaw_left.dae"/>
+        <mesh filename="../../dobot_description/meshes/dae/jaw_left.dae"/>
       </geometry>
     </collision>
   </link>
@@ -187,13 +187,13 @@
     <visual>
       <origin rpy="0 0 0" xyz="-8.06784046553505e-05 0.0009 -0.027843407267811"/>
       <geometry>
-        <mesh filename="C:\Users\karthikkrazy\Downloads\simplestrobotmodel\dobot_magician_ros2\dobot_description\meshes\dae/jaw_right.dae"/>
+        <mesh filename="../../dobot_description/meshes/dae/jaw_right.dae"/>
       </geometry>
     </visual>
     <collision>
       <origin rpy="0 0 0" xyz="-8.06784046553505e-05 0.0009 -0.027843407267811"/>
       <geometry>
-        <mesh filename="C:\Users\karthikkrazy\Downloads\simplestrobotmodel\dobot_magician_ros2\dobot_description\meshes\dae/jaw_right.dae"/>
+        <mesh filename="../../dobot_description/meshes/dae/jaw_right.dae"/>
       </geometry>
     </collision>
   </link>

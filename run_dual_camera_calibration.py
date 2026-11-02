@@ -210,12 +210,6 @@ def run():
             with open(out_file, "w") as f:
                 json.dump(data, f, indent=2)
             print(f"[Saved] Extrinsics & geometric layout saved to {os.path.abspath(out_file)}", flush=True)
-                "camera_side": {"index": 2, "fps": current_fps},
-                "calibrated": True
-            }
-            with open(out_file, "w") as f:
-                json.dump(data, f, indent=2)
-            print(f"[Saved] Extrinsics saved to {os.path.abspath(out_file)}", flush=True)
 
     cam1.release()
     cam2.release()
