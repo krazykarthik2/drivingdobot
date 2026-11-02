@@ -86,6 +86,14 @@ class RealDobotTwinSynchronizer:
         self.active_prompt = None
         self.prompt_lock = threading.Lock()
         self.homography = None
+        self.alignment_params = {}
+        if os.path.exists("camera_twin_alignment.json"):
+            try:
+                with open("camera_twin_alignment.json", "r") as f:
+                    self.alignment_params = json.load(f)
+                    print(f"[Config] Loaded alignment: {self.alignment_params}")
+            except Exception:
+                pass
 
     def _sync_twin_to_real(self, x_mm, y_mm, z_mm, r_deg=0.0, grip=False):
         """Drives virtual PyBullet twin to exactly match the real physical robot coordinates."""
@@ -197,6 +205,15 @@ class RealDobotTwinSynchronizer:
             corners, ids, _ = self.detector.detectMarkers(cam_frame)
             if ids is not None and len(ids) > 0:
                 cv2.aruco.drawDetectedMarkers(cam_frame, corners, ids)
+
+            # Apply calibrated camera alignment if available
+            if hasattr(self, "alignment_params") and self.alignment_params:
+                h, w = cam_frame.shape[:2]
+                center = (w / 2.0, h / 2.0)
+                M = cv2.getRotationMatrix2D(center, self.alignment_params.get("rotation_deg", 0.0), self.alignment_params.get("scale", 1.0))
+                M[0, 2] += self.alignment_params.get("offset_x", 0)
+                M[1, 2] += self.alignment_params.get("offset_y", 0)
+                cam_frame = cv2.warpAffine(cam_frame, M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0))
 
             # Alpha blend real camera and digital twin
             if cam_frame.shape[:2] != sim_bgr.shape[:2]:
