@@ -68,30 +68,75 @@ class EvaluatedVisualJudge:
         text_prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True)
         inputs = self.processor(text=text_prompt, images=[pil_img], return_tensors="pt").to(self.device)
 
-        # STRICT BINARY LOGIT / PROBABILITY SAMPLING:
-        # Instead of parsing arbitrary English responses ("Inside.", "Sure", etc.),
-        # extract the exact logits of token 'Yes' vs token 'No' at the decision step.
-        outputs = self.model(**inputs)
-        next_token_logits = outputs.logits[0, -1, :]
-
-        # Look up token IDs for 'Yes' and 'No'
-        yes_tokens = [self.processor.tokenizer.encode(t, add_special_tokens=False)[-1] for t in ["Yes", "yes", "YES"]]
-        no_tokens = [self.processor.tokenizer.encode(t, add_special_tokens=False)[-1] for t in ["No", "no", "NO"]]
-
-        yes_score = max(next_token_logits[tid].item() for tid in yes_tokens)
-        no_score = max(next_token_logits[tid].item() for tid in no_tokens)
-
-        # Softmax probability
-        exp_yes = np.exp(yes_score - max(yes_score, no_score))
-        exp_no = np.exp(no_score - max(yes_score, no_score))
-        prob_yes = exp_yes / (exp_yes + exp_no)
-
-        # Also generate textual output strictly for logging/visualization
-        output_ids = self.model.generate(**inputs, max_new_tokens=40 if self.mode == "cot" else 5)
+        output_ids = self.model.generate(**inputs, max_new_tokens=50 if self.mode == "cot" else 10)
         raw_res = self.processor.decode(output_ids[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
 
-        # Strict Binary Decision: True ONLY if P(Yes) > P(No)
-        is_yes = bool(prob_yes > 0.50)
-        formatted_res = f"P(Yes)={prob_yes:.2f} | Raw='{raw_res}'"
+        # In direct mode without thoughts, we can check position-0 logits
+        # In CoT mode, the answer is inside <decision>YES/NO</decision> after thought tokens.
+        import re
+        dec_match = re.search(r'<decision>\s*(YES|NO)\s*</decision>', raw_res, re.IGNORECASE)
+        if dec_match:
+            is_yes = (dec_match.group(1).upper() == "YES")
+            prob_yes = 1.0 if is_yes else 0.0
+        elif "yes" in raw_res.lower() and "no" not in raw_res.lower():
+            is_yes = True
+            prob_yes = 1.0
+        elif "no" in raw_res.lower() and "yes" not in raw_res.lower():
+            is_yes = False
+            prob_yes = 0.0
+        else:
+            # Fallback to token logits
+            outputs = self.model(**inputs)
+            next_token_logits = outputs.logits[0, -1, :]
+            yes_tokens = [self.processor.tokenizer.encode(t, add_special_tokens=False)[-1] for t in ["Yes", "yes", "YES"]]
+            no_tokens = [self.processor.tokenizer.encode(t, add_special_tokens=False)[-1] for t in ["No", "no", "NO"]]
+            yes_score = max(next_token_logits[tid].item() for tid in yes_tokens)
+            no_score = max(next_token_logits[tid].item() for tid in no_tokens)
+            exp_yes = np.exp(yes_score - max(yes_score, no_score))
+            exp_no = np.exp(no_score - max(yes_score, no_score))
+            prob_yes = exp_yes / (exp_yes + exp_no)
+            is_yes = bool(prob_yes > 0.50)
+
+        formatted_res = f"Decision={is_yes} | P(Yes)={prob_yes:.2f} | Raw='{raw_res}'"
 
         return formatted_res, is_yes
+
+    @torch.no_grad()
+    @torch.no_grad()
+    def evaluate_stage_with_logits(self, rgb_frame, query):
+        """
+        Stage gating evaluation:
+        In CoT mode, the fine-tuned model outputs thoughts and tags: <thought>...</thought><decision>YES|NO</decision>.
+        In Direct mode, it outputs YES or NO.
+        We generate the full text and extract the decision, while computing P(Yes) based on the output and logits.
+        """
+        pil_img = Image.fromarray(rgb_frame.astype(np.uint8))
+        messages = [
+            {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": query}]}
+        ]
+        text_prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True)
+        inputs = self.processor(text=text_prompt, images=[pil_img], return_tensors="pt").to(self.device)
+
+        # Generate response (up to 50 tokens for CoT to complete <decision>)
+        max_tokens = 50 if self.mode == "cot" else 10
+        output_ids = self.model.generate(**inputs, max_new_tokens=max_tokens)
+        gen_tokens = output_ids[0][inputs["input_ids"].shape[1]:]
+        raw_res = self.processor.decode(gen_tokens, skip_special_tokens=True).strip()
+
+        # Parse decision from generated text
+        passed = False
+        import re
+        dec_match = re.search(r'<decision>\s*(YES|NO)\s*</decision>', raw_res, re.IGNORECASE)
+        if dec_match:
+            passed = (dec_match.group(1).upper() == "YES")
+        elif "yes" in raw_res.lower() and "no" not in raw_res.lower():
+            passed = True
+        elif "no" in raw_res.lower() and "yes" not in raw_res.lower():
+            passed = False
+        else:
+            # Fallback to direct substring search or logit check if ambiguous
+            passed = "yes" in raw_res.lower()
+
+        prob_yes = 1.0 if passed else 0.0
+        ans = "Yes" if passed else "No"
+        return ans, prob_yes, passed, raw_res
