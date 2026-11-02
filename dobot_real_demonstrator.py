@@ -153,7 +153,7 @@ class DobotRealDemonstrator:
         with self.frame_lock:
             frame = self.latest_frame.copy() if self.latest_frame is not None else None
 
-        cur_x, cur_y, cur_z, _ = self.current_pose
+        cur_x, cur_y, cur_z = self.current_pose[0], self.current_pose[1], self.current_pose[2]
         new_x = float(np.clip(cur_x + dx, 140.0, 270.0))
         new_y = float(np.clip(cur_y + dy, -130.0, 130.0))
         new_z = float(np.clip(cur_z + dz, -35.0, 80.0))
@@ -294,7 +294,7 @@ class DobotRealDemonstrator:
 
             # Instruction and Robot Pose
             cv2.putText(disp, f"Goal: '{self.current_instruction}'", (15, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
-            x, y, z, _ = self.current_pose
+            x, y, z = self.current_pose[0], self.current_pose[1], self.current_pose[2]
             cv2.putText(disp, f"Pose: X={x:.1f} Y={y:.1f} Z={z:.1f} mm | Grip={'CLOSED' if self.gripper_closed else 'OPEN'}",
                         (15, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1)
 
