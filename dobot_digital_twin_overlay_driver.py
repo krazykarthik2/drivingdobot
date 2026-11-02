@@ -107,7 +107,19 @@ class RealDobotTwinSynchronizer:
             print(f"[Warning] Dobot connection failed ({e}). Operating in DRY-RUN mode.\n")
             self.connected = False
 
-        # 4. ArUco Marker Ensemble Detection for Instant Self-Recalibration ('r')
+        # Clear alarms on connection
+        try:
+            m = Message()
+            m.id = 20 # ClearAllAlarmsState
+            m.ctrl = 1
+            m.params = bytearray([])
+            self.dobot._send_message(m)
+            self.dobot._read_message()
+            print("[Hardware] Dobot alarms cleared successfully.")
+        except Exception:
+            pass
+
+        self.last_pose_query_time = time.time()
         self.dict_4x4 = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
         self.recalib_status_msg = ""
         self.recalib_status_time = 0
@@ -143,7 +155,23 @@ class RealDobotTwinSynchronizer:
                     self.latest_frame = frame
             time.sleep(0.010)
 
-    def sim_proj(self, pt_3d):
+    def query_real_pose_safe(self):
+        """Queries physical robot pose safely every 2 seconds when idle, waiting for reply without bombarding."""
+        if not self.connected or not self.dobot:
+            return self.current_real_pose
+
+        now = time.time()
+        # Query only every 2 seconds when idle to avoid saturating Dobot serial queue
+        if now - self.last_pose_query_time >= 2.0 and self.current_action_status in ["Ready / Standby", "Task Completed"]:
+            self.last_pose_query_time = now
+            with self.robot_lock:
+                try:
+                    p = self.dobot.pose()
+                    if p is not None and len(p) >= 4:
+                        self.current_real_pose = list(p)
+                except Exception:
+                    pass
+        return self.current_real_pose
         """Projects 3D simulation coordinate [x, y, z] to 2D screen coordinate [u, v]."""
         clip = self.VP @ np.array([pt_3d[0], pt_3d[1], pt_3d[2], 1.0])
         ndc = clip[:3] / clip[3]
@@ -431,8 +459,8 @@ class RealDobotTwinSynchronizer:
                 continue
 
             # 2. Continuous real-time twin synchronization
-            # Uses current tracked pose to keep twin moving in smooth lockstep
-            p_cur = self.current_real_pose
+            # Query physical pose safely every 2s when idle without bombarding the serial queue
+            p_cur = self.query_real_pose_safe()
             self._sync_twin_to_real(p_cur[0], p_cur[1], p_cur[2], p_cur[3], False)
 
             # 3. Continuous Simulation Rendering WITH Virtual ArUco Markers

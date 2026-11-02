@@ -41,20 +41,57 @@ class EvaluatedVisualJudge:
 
     @torch.no_grad()
     def plan_subtasks(self, rgb_frame, user_goal):
+        """
+        Plans robotic subtasks with in-context few-shot guidance to enforce
+        invariance, correct reasoning, and dynamic stage counts instead of overfitting to hotspots.
+        """
         pil_img = Image.fromarray(rgb_frame.astype(np.uint8))
-        if self.mode == "cot":
-            prompt = f"Goal: '{user_goal}'. Break into robotic subtasks."
-        elif self.mode == "direct":
-            prompt = f"Goal: '{user_goal}'. Break into robotic subtasks."
-        else:
-            prompt = f"User Goal: '{user_goal}'. Break this into sequential robotic subtasks as a concise numbered list."
+        
+        system_instruction = (
+            "You are a robotic task planner. Decompose the user's high-level goal into sequential subtasks.\n"
+            "Rules:\n"
+            "- 'approach <object>' -> only 2 stages: hover above object, descend near object. NO gripping.\n"
+            "- 'push <object> <direction>' -> 4 stages: hover beside, descend, push sweep, retract.\n"
+            "- 'pick <object> and place on <target>' -> 7 stages: hover, descend, grip, lift, transfer, lower, release.\n\n"
+            "Example 1:\n"
+            "Goal: 'approach the pen'\n"
+            "<thought>Instruction is only to approach the pen. Zero gripping or lifting required.</thought>\n"
+            "<plan>\n"
+            "1. hover above pen\n"
+            "2. approach near pen\n"
+            "</plan>\n\n"
+            "Example 2:\n"
+            "Goal: 'push the blue pen to the right'\n"
+            "<thought>Pushing object requires lateral sweeping without grasping.</thought>\n"
+            "<plan>\n"
+            "1. hover beside blue pen\n"
+            "2. descend to contact height\n"
+            "3. push blue pen to the right\n"
+            "4. retract arm\n"
+            "</plan>\n\n"
+            "Example 3:\n"
+            "Goal: 'pick up the green cube and place it on red platform'\n"
+            "<thought>Full pick-and-place requires grasp, lift, transfer, and release on destination.</thought>\n"
+            "<plan>\n"
+            "1. hover above green cube\n"
+            "2. descend to green cube\n"
+            "3. grip green cube\n"
+            "4. lift green cube\n"
+            "5. transfer to red platform\n"
+            "6. lower onto red platform\n"
+            "7. release green cube and retract\n"
+            "</plan>"
+        )
 
         messages = [
-            {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": prompt}]}
+            {"role": "user", "content": [
+                {"type": "image"},
+                {"type": "text", "text": f"{system_instruction}\n\nGoal: '{user_goal}'. Break into robotic subtasks."}
+            ]}
         ]
         text_prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True)
         inputs = self.processor(text=text_prompt, images=[pil_img], return_tensors="pt").to(self.device)
-        output_ids = self.model.generate(**inputs, max_new_tokens=90)
+        output_ids = self.model.generate(**inputs, max_new_tokens=120, do_sample=False)
         generated_ids = output_ids[0][inputs["input_ids"].shape[1]:]
         raw_res = self.processor.decode(generated_ids, skip_special_tokens=True).strip()
         return raw_res

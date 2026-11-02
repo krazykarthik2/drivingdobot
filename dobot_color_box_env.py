@@ -94,7 +94,7 @@ class DobotColorBoxEnv:
         urdf_path = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "dobot_magician_ros2", "ai_training", "env", "dobot_pybullet.urdf")
         )
-        self.robot_id = p.loadURDF(urdf_path, [0, 0, 0], useFixedBase=True)
+        self.robot_id = p.loadURDF(urdf_path, [-0.080, 0, 0], useFixedBase=True)
 
         for j in [self.gripper_j_left, self.gripper_j_right]:
             p.changeDynamics(self.robot_id, j, lateralFriction=3.5, spinningFriction=0.2)
