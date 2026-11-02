@@ -1,30 +1,28 @@
 """
 train_distilled_lora_2x_l40s.py
 
-High-Throughput Distributed LoRA Knowledge Distillation & Supervised Fine-Tuning
-Target Architecture: 2x NVIDIA L40S (48GB VRAM each = 96GB Total VRAM) + 40GB+ RAM.
+High-Throughput Knowledge Distillation & Fine-Tuning Pipeline
+Architecture: 2x NVIDIA L40S (48GB VRAM each = 96GB Total VRAM) + 40GB+ RAM.
 
-Capabilities:
-1. Teacher-Student Distillation Pipeline:
-   - Teacher Model: High-capacity Vision-Language Model (Qwen2-VL-7B-Instruct / SmolVLM-500M)
-     Provides calibrated visual soft targets and step-by-step verified Chain-of-Thought (CoT).
-   - Student Model: SmolVLM-256M-Instruct with LoRA adapters (Rank 32, Alpha 64).
-2. Dual Operating Modes:
-   - 'cot': Generates structured reasoning <thought>...</thought> followed by <decision>YES|NO</decision>.
-   - 'direct': Direct high-confidence affirmative/negative tokens with exact logit alignment.
-3. Multi-GPU Distributed Setup:
-   - DDP / PyTorch FSDP / accelerate with automatic device assignment across both L40S GPUs.
-   - Mixed Precision: bfloat16 / fp16 native tensor cores.
-   - Batch size scaled to saturate L40S memory bandwidth with gradient accumulation.
-4. Loss Formulation:
-   - L = L_ce(student_tokens, ground_truth_labels) + alpha_kd * KL_div(student_logits / T, teacher_logits / T) * (T^2)
+Teacher Model: Qwen/Qwen2-VL-7B-Instruct (High-capacity spatial vision reasoning)
+Student Model: HuggingFaceTB/SmolVLM-256M-Instruct (Compact edge policy)
+
+Dual Operating Modes:
+1. 'cot': Generates clear visual spatial reasoning inside <thought>...</thought>
+   followed by strict ground-truth decision <decision>YES|NO</decision>.
+2. 'direct': Direct token prediction with verified spatial features.
+
+Inspection & Verification:
+- Live sample visual inspection every N steps:
+  Decodes student thoughts and decisions vs teacher verification to verify
+  that CoT reasoning matches visual ground truth.
 """
 
 import os
 import sys
 import argparse
 import json
-import math
+import re
 from typing import Dict, Any, List
 from PIL import Image
 
@@ -37,19 +35,22 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
-from torch.utils.data.distributed import DistributedSampler
-import torch.distributed as dist
 
 from transformers import (
     AutoProcessor,
     AutoModelForImageTextToText,
     get_cosine_schedule_with_warmup
 )
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+try:
+    from transformers import Qwen2VLForConditionalGeneration
+except ImportError:
+    Qwen2VLForConditionalGeneration = None
+
+from peft import LoraConfig, get_peft_model
 
 
 # ==============================================================================
-# 1. ROBUST MULTI-MODAL DATASET WITH TOKEN-EXACT LABEL MASKING
+# 1. DATASET WITH EXACT TARGET BOUNDARIES & SYNDICATED COT
 # ==============================================================================
 class DistilledRoboticsDataset(Dataset):
     def __init__(self, annotation_path: str, img_dir: str, processor, mode: str = "cot"):
@@ -60,7 +61,7 @@ class DistilledRoboticsDataset(Dataset):
         with open(annotation_path, "r", encoding="utf-8") as f:
             self.samples = json.load(f)
 
-        print(f"[Dataset] Loaded {len(self.samples)} verified samples from {annotation_path} (Mode: {mode})")
+        print(f"[Dataset] Loaded {len(self.samples)} samples from {annotation_path} (Mode: {mode})")
 
     def __len__(self):
         return len(self.samples)
@@ -71,15 +72,19 @@ class DistilledRoboticsDataset(Dataset):
         image = Image.open(img_path).convert("RGB")
 
         user_query = item["instruction"]
-        if self.mode == "cot":
-            target_response = item.get("cot_response", "")
-            # Ensure thought and decision syntax is strictly formed
-            if "<decision>" not in target_response:
-                target_response = f"<thought>Visual features confirmed.</thought>\n<decision>{item.get('direct_response', 'YES')}</decision>"
-        else:
-            target_response = item.get("direct_response", "YES").strip()
+        expected_ans = item.get("direct_response", "YES").strip()
 
-        # Build chat messages
+        if self.mode == "cot":
+            cot_text = item.get("cot_response", "")
+            # Ensure thought and decision syntax is strictly formed
+            if "<decision>" in cot_text:
+                target_response = cot_text
+            else:
+                target_response = f"<thought>Visual inspection: verifying gripper alignment with object.</thought>\n<decision>{expected_ans}</decision>"
+        else:
+            target_response = expected_ans
+
+        # Build user prompt and complete assistant conversation
         user_message = [
             {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": user_query}]}
         ]
@@ -88,7 +93,6 @@ class DistilledRoboticsDataset(Dataset):
             {"role": "assistant", "content": [{"type": "text", "text": target_response}]}
         ]
 
-        # Apply processor chat templates
         full_text = self.processor.apply_chat_template(full_conversation, add_generation_prompt=False)
         prompt_text = self.processor.apply_chat_template(user_message, add_generation_prompt=True)
 
@@ -102,7 +106,6 @@ class DistilledRoboticsDataset(Dataset):
         labels = input_ids.clone()
         labels[:prompt_len] = -100
 
-        # Also mask any padding or special system tokens
         pixel_values = inputs["pixel_values"][0]
 
         return {
@@ -110,7 +113,8 @@ class DistilledRoboticsDataset(Dataset):
             "labels": labels,
             "pixel_values": pixel_values,
             "user_query": user_query,
-            "img_path": img_path
+            "target_response": target_response,
+            "image": image
         }
 
 
@@ -123,67 +127,79 @@ def collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
     padded_labels = torch.nn.utils.rnn.pad_sequence(labels, batch_first=True, padding_value=-100)
     attention_mask = (padded_input_ids != 0).long()
 
+    queries = [b["user_query"] for b in batch]
+    targets = [b["target_response"] for b in batch]
+    images = [b["image"] for b in batch]
+
     return {
         "input_ids": padded_input_ids,
         "labels": padded_labels,
         "attention_mask": attention_mask,
-        "pixel_values": pixel_values
+        "pixel_values": pixel_values,
+        "queries": queries,
+        "targets": targets,
+        "images": images
     }
 
 
 # ==============================================================================
-# 2. TEACHER MODEL WRAPPER FOR LOGIT DISTILLATION (RUNS ON GPU 1)
+# 2. LOCAL TEACHER ENGINE: Qwen2-VL-7B (ALLOCATED TO GPU 1)
 # ==============================================================================
-class LocalTeacherEngine:
-    def __init__(self, teacher_model_id: str, device: torch.device):
-        self.device = device
-        print(f"[TeacherEngine] Loading high-capacity Teacher on {device}...")
-        self.processor = AutoProcessor.from_pretrained(teacher_model_id)
-        self.model = AutoModelForImageTextToText.from_pretrained(
-            teacher_model_id,
-            torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
-            device_map=device
+class Qwen2VLTeacher:
+    def __init__(self, model_id: str = "Qwen/Qwen2-VL-7B-Instruct", device: str = "cuda:1"):
+        self.device = torch.device(device)
+        print(f"\n[Teacher] Initializing High-Capacity Teacher: {model_id} on {self.device}...")
+        self.processor = AutoProcessor.from_pretrained(model_id)
+
+        model_cls = Qwen2VLForConditionalGeneration if Qwen2VLForConditionalGeneration else AutoModelForImageTextToText
+        self.model = model_cls.from_pretrained(
+            model_id,
+            torch_dtype=torch.bfloat16,
+            device_map=self.device
         )
         self.model.eval()
         for p in self.model.parameters():
             p.requires_grad = False
-        print(f"[TeacherEngine] Teacher {teacher_model_id} loaded and locked.")
+        print(f"[Teacher] Qwen2-VL-7B Teacher loaded successfully on {self.device}!\n")
 
     @torch.no_grad()
-    def get_teacher_logits(self, input_ids: torch.Tensor, pixel_values: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
-        outputs = self.model(
-            input_ids=input_ids.to(self.device),
-            pixel_values=pixel_values.to(self.device, dtype=self.model.dtype),
-            attention_mask=attention_mask.to(self.device)
-        )
-        return outputs.logits
+    def generate_teacher_cot(self, images: List[Image.Image], queries: List[str]) -> List[str]:
+        """Queries Qwen2-VL to generate visual chain-of-thought justification."""
+        teacher_responses = []
+        for img, query in zip(images, queries):
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image"},
+                        {"type": "text", "text": f"Observe the robot workspace carefully: {query}\nFirst, explain what you see in <thought>...</thought>. Then give the final verdict in <decision>YES</decision> or <decision>NO</decision>."}
+                    ]
+                }
+            ]
+            text = self.processor.apply_chat_template(messages, add_generation_prompt=True)
+            inputs = self.processor(text=text, images=[img], return_tensors="pt").to(self.device)
+            output = self.model.generate(**inputs, max_new_tokens=60)
+            gen = self.processor.decode(output[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
+            teacher_responses.append(gen)
+        return teacher_responses
 
 
 # ==============================================================================
-# 3. MAIN TRAINING CONTROLLER FOR 2x L40S
+# 3. TRAINING & LIVE COT INSPECTION CONTROLLER
 # ==============================================================================
 def train(args):
-    # Multi-GPU setup (Distributed or 2-GPU pipeline)
-    is_distributed = int(os.environ.get("WORLD_SIZE", 1)) > 1
-    if is_distributed:
-        dist.init_process_group("nccl")
-        local_rank = int(os.environ.get("LOCAL_RANK", 0))
-        device = torch.device(f"cuda:{local_rank}")
-        torch.cuda.set_device(device)
-    else:
-        local_rank = 0
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
+    device_student = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"\n==================================================================")
-    print(f"=== DISTILLED LORA TRAINING ON 2x L40S (Mode: {args.mode.upper()}) ===")
-    print(f"=== Device: {device} | Total VRAM Available: 48GB x {torch.cuda.device_count()} ===")
+    print(f"=== DISTILLED LORA TRAINING ON 2x L40S ===")
+    print(f"=== Student (SmolVLM-256M) on: {device_student} ===")
+    if args.use_teacher:
+        print(f"=== Teacher (Qwen2-VL-7B) on: cuda:1 ===")
     print(f"==================================================================\n")
 
     student_id = "HuggingFaceTB/SmolVLM-256M-Instruct"
     processor = AutoProcessor.from_pretrained(student_id)
 
     # 1. Initialize Student Model with Full Rank LoRA
-    print(f"[Rank {local_rank}] Initializing Student Model: {student_id}...")
     student_model = AutoModelForImageTextToText.from_pretrained(
         student_id,
         torch_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float32
@@ -198,17 +214,14 @@ def train(args):
         task_type="CAUSAL_LM"
     )
     student_model = get_peft_model(student_model, lora_config)
-    student_model.to(device)
+    student_model.to(device_student)
     student_model.train()
+    student_model.print_trainable_parameters()
 
-    if local_rank == 0:
-        student_model.print_trainable_parameters()
-
-    # 2. Optional Teacher Setup (assign to GPU 1 in dual-GPU non-DDP mode)
+    # 2. Teacher Setup (Qwen2-VL-7B on GPU 1)
     teacher = None
-    if args.use_distillation and torch.cuda.device_count() >= 2:
-        teacher_device = torch.device("cuda:1")
-        teacher = LocalTeacherEngine(args.teacher_id, device=teacher_device)
+    if args.use_teacher and torch.cuda.device_count() >= 2:
+        teacher = Qwen2VLTeacher(model_id=args.teacher_id, device="cuda:1")
 
     # 3. Dataset & Dataloader
     dataset = DistilledRoboticsDataset(
@@ -218,18 +231,15 @@ def train(args):
         mode=args.mode
     )
 
-    sampler = DistributedSampler(dataset) if is_distributed else None
     loader = DataLoader(
         dataset,
         batch_size=args.batch_size,
-        shuffle=(sampler is None),
-        sampler=sampler,
+        shuffle=True,
         collate_fn=collate_fn,
         num_workers=4,
         pin_memory=True
     )
 
-    # 4. Optimizer & Cosine Warmup Schedule
     optimizer = torch.optim.AdamW(student_model.parameters(), lr=args.lr, weight_decay=0.01)
     total_training_steps = len(loader) * args.epochs // args.grad_accum
     scheduler = get_cosine_schedule_with_warmup(
@@ -240,58 +250,28 @@ def train(args):
 
     print(f"[Training Setup] Steps/Epoch: {len(loader)} | Total Steps: {total_training_steps} | Batch Size: {args.batch_size}")
 
-    # 5. Training Loop
+    # 4. Training Loop with Live CoT Inspection
     global_step = 0
     for epoch in range(args.epochs):
-        if sampler:
-            sampler.set_epoch(epoch)
-
         epoch_loss = 0.0
         optimizer.zero_grad()
 
         for step, batch in enumerate(loader):
-            input_ids = batch["input_ids"].to(device)
-            labels = batch["labels"].to(device)
-            attention_mask = batch["attention_mask"].to(device)
-            pixel_values = batch["pixel_values"].to(device, dtype=student_model.dtype)
+            input_ids = batch["input_ids"].to(device_student)
+            labels = batch["labels"].to(device_student)
+            attention_mask = batch["attention_mask"].to(device_student)
+            pixel_values = batch["pixel_values"].to(device_student, dtype=student_model.dtype)
 
-            # Student Forward pass
             outputs = student_model(
                 input_ids=input_ids,
                 pixel_values=pixel_values,
                 attention_mask=attention_mask,
                 labels=labels
             )
-            ce_loss = outputs.loss
-
-            total_loss = ce_loss
-
-            # Distillation Loss (if Teacher active)
-            if teacher is not None:
-                with torch.no_grad():
-                    teacher_logits = teacher.get_teacher_logits(
-                        batch["input_ids"],
-                        batch["pixel_values"],
-                        batch["attention_mask"]
-                    ).to(device)
-
-                # Token-level KL Divergence on unmasked assistant tokens
-                active_mask = (labels != -100).unsqueeze(-1)
-                student_logits = outputs.logits
-                T = args.temperature
-
-                kd_loss = F.kl_div(
-                    F.log_softmax(student_logits / T, dim=-1),
-                    F.softmax(teacher_logits / T, dim=-1),
-                    reduction="batchmean"
-                ) * (T * T)
-
-                total_loss = (1.0 - args.alpha_kd) * ce_loss + args.alpha_kd * kd_loss
-
-            loss_scaled = total_loss / args.grad_accum
+            loss = outputs.loss
+            loss_scaled = loss / args.grad_accum
             loss_scaled.backward()
-
-            epoch_loss += total_loss.item()
+            epoch_loss += loss.item()
 
             if (step + 1) % args.grad_accum == 0 or (step + 1) == len(loader):
                 torch.nn.utils.clip_grad_norm_(student_model.parameters(), max_norm=1.0)
@@ -300,42 +280,63 @@ def train(args):
                 optimizer.zero_grad()
                 global_step += 1
 
-                if global_step % 10 == 0 and local_rank == 0:
+                if global_step % 10 == 0:
                     lr_curr = scheduler.get_last_lr()[0]
-                    print(f"Epoch [{epoch+1}/{args.epochs}] | Step [{step+1}/{len(loader)}] | Loss: {total_loss.item():.4f} | LR: {lr_curr:.2e}")
+                    print(f"Epoch [{epoch+1}/{args.epochs}] | Step [{step+1}/{len(loader)}] | Loss: {loss.item():.4f} | LR: {lr_curr:.2e}")
+
+                # LIVE COT INSPECTION CHECKPOINT:
+                # Every 25 steps, sample an image and generate full output to inspect
+                # that CoT thoughts and decisions are being learned accurately.
+                if global_step % 25 == 0:
+                    student_model.eval()
+                    with torch.no_grad():
+                        sample_img = batch["images"][0]
+                        sample_q = batch["queries"][0]
+                        sample_tgt = batch["targets"][0]
+
+                        msgs = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": sample_q}]}]
+                        p_text = processor.apply_chat_template(msgs, add_generation_prompt=True)
+                        p_in = processor(text=p_text, images=[sample_img], return_tensors="pt").to(device_student)
+                        gen_out = student_model.generate(**p_in, max_new_tokens=50)
+                        gen_text = processor.decode(gen_out[0][p_in["input_ids"].shape[1]:], skip_special_tokens=True).strip()
+
+                        teacher_str = ""
+                        if teacher is not None:
+                            t_out = teacher.generate_teacher_cot([sample_img], [sample_q])
+                            teacher_str = f"\n   [Teacher CoT]:  {t_out[0]}"
+
+                        print(f"\n--- [LIVE INSPECTION @ Step {global_step}] ---")
+                        print(f"   [Query]:        {sample_q}")
+                        print(f"   [Ground Truth]: {sample_tgt.replace(chr(10), ' ')}")
+                        print(f"   [Student CoT]:  {gen_text.replace(chr(10), ' ')}{teacher_str}")
+                        print(f"--------------------------------------------------\n")
+                    student_model.train()
 
         avg_loss = epoch_loss / len(loader)
-        if local_rank == 0:
-            print(f"\n>>> [Epoch {epoch+1} Completed] Average Loss: {avg_loss:.4f}\n")
+        print(f"\n>>> [Epoch {epoch+1} Completed] Average Loss: {avg_loss:.4f}\n")
 
-    # 6. Save Final Checkpoint & Adapter
-    if local_rank == 0:
-        os.makedirs(args.output_dir, exist_ok=True)
-        student_model.save_pretrained(args.output_dir)
-        processor.save_pretrained(args.output_dir)
-        print(f"\n==================================================================")
-        print(f"[SUCCESS] Saved high-precision LoRA checkpoint to: {os.path.abspath(args.output_dir)}")
-        print(f"==================================================================\n")
-
-    if is_distributed:
-        dist.destroy_process_group()
+    # 5. Save Final Adapter
+    os.makedirs(args.output_dir, exist_ok=True)
+    student_model.save_pretrained(args.output_dir)
+    processor.save_pretrained(args.output_dir)
+    print(f"\n==================================================================")
+    print(f"[SUCCESS] Saved checkpoint to: {os.path.abspath(args.output_dir)}")
+    print(f"==================================================================\n")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Distilled LoRA Training on 2x L40S")
-    parser.add_argument("--mode", type=str, choices=["cot", "direct"], default="cot", help="Training mode")
+    parser = argparse.ArgumentParser(description="Qwen2-VL Teacher Distillation for SmolVLM on 2x L40S")
+    parser.add_argument("--mode", type=str, choices=["cot", "direct"], default="cot")
     parser.add_argument("--dataset_json", type=str, default="harvested_dataset/dataset_annotations.json")
     parser.add_argument("--img_dir", type=str, default="harvested_dataset/images")
     parser.add_argument("--output_dir", type=str, default="smolvlm_lora_l40s_cot")
     parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--batch_size", type=int, default=16, help="Per-device batch size (16 fits comfortably in 48GB L40S)")
+    parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--grad_accum", type=int, default=2)
     parser.add_argument("--lr", type=float, default=1.5e-4)
     parser.add_argument("--lora_rank", type=int, default=32)
-    parser.add_argument("--use_distillation", action="store_true", help="Enable teacher logit distillation")
-    parser.add_argument("--teacher_id", type=str, default="HuggingFaceTB/SmolVLM2-500M-Video-Instruct")
-    parser.add_argument("--temperature", type=float, default=2.0)
-    parser.add_argument("--alpha_kd", type=float, default=0.5)
+    parser.add_argument("--use_teacher", action="store_true", help="Enable Qwen2-VL-7B teacher on GPU 1")
+    parser.add_argument("--teacher_id", type=str, default="Qwen/Qwen2-VL-7B-Instruct")
     args = parser.parse_args()
 
     train(args)

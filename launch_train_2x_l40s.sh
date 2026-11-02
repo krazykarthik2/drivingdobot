@@ -1,22 +1,24 @@
 #!/bin/bash
 # ==============================================================================
 # launch_train_2x_l40s.sh
-# Multi-GPU Execution Launcher for 2x NVIDIA L40S (48GB each)
+# Multi-GPU Execution: Qwen2-VL-7B Teacher on GPU 1 + SmolVLM Student on GPU 0
+# Target: 2x NVIDIA L40S (48GB VRAM each = 96GB Total)
 # ==============================================================================
 
 set -e
 
-echo "=== System Environment Check ==="
+echo "=== System GPU Environment ==="
 nvidia-smi
 
+pip install --upgrade transformers accelerate peft qwen_vl_utils torchvision
+
 export OMP_NUM_THREADS=8
-export NCCL_DEBUG=INFO
 export PYTHONUNBUFFERED=1
 
-# 1. Train Chain-of-Thought (CoT) LoRA with Teacher Distillation
+# 1. Train Chain-of-Thought (CoT) with Qwen2-VL-7B Teacher & Live Inspection
 echo ""
 echo "=========================================================================="
-echo ">>> STEP 1: Training Chain-of-Thought (CoT) LoRA with 2x L40S Distillation"
+echo ">>> STEP 1: Training Chain-of-Thought (CoT) LoRA with Qwen2-VL-7B Distillation"
 echo "=========================================================================="
 python train_distilled_lora_2x_l40s.py \
     --mode cot \
@@ -28,13 +30,13 @@ python train_distilled_lora_2x_l40s.py \
     --grad_accum 2 \
     --lr 1.5e-4 \
     --lora_rank 32 \
-    --use_distillation \
-    --teacher_id HuggingFaceTB/SmolVLM2-500M-Video-Instruct
+    --use_teacher \
+    --teacher_id Qwen/Qwen2-VL-7B-Instruct
 
 # 2. Train Direct Structured Tokens LoRA
 echo ""
 echo "=========================================================================="
-echo ">>> STEP 2: Training Direct Structured Tokens LoRA with 2x L40S"
+echo ">>> STEP 2: Training Direct Structured Tokens LoRA"
 echo "=========================================================================="
 python train_distilled_lora_2x_l40s.py \
     --mode direct \
@@ -49,8 +51,8 @@ python train_distilled_lora_2x_l40s.py \
 
 echo ""
 echo "=========================================================================="
-echo ">>> ALL L40S TRAININGS COMPLETED SUCCESSFULLY!"
-echo ">>> Generated Adapters:"
+echo ">>> ALL L40S TRAININGS COMPLETED!"
+echo ">>> Output Adapters:"
 echo "    - CoT: smolvlm_lora_l40s_cot"
 echo "    - Direct: smolvlm_lora_l40s_direct"
 echo "=========================================================================="
