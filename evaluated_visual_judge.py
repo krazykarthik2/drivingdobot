@@ -111,7 +111,11 @@ class EvaluatedVisualJudge:
             for token_text in streamer:
                 print(token_text, end="", flush=True)
                 full_text.append(token_text)
-            gen_thread.join()
+                accumulated = "".join(full_text)
+                if "</plan>" in accumulated.lower():
+                    # Stop streaming as soon as the plan block is complete
+                    break
+            gen_thread.join(timeout=1.0)
             print("\n")
             return "".join(full_text).strip()
         else:
