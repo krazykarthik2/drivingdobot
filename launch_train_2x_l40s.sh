@@ -10,10 +10,13 @@ set -e
 echo "=== System GPU Environment ==="
 nvidia-smi
 
+# Fix brotlicffi / httpx decompression compatibility issue
+pip install --upgrade "brotli>=1.1.0" "brotlicffi>=1.1.0.0" httpx huggingface_hub
 pip install --upgrade transformers accelerate peft qwen_vl_utils torchvision
 
 export OMP_NUM_THREADS=8
 export PYTHONUNBUFFERED=1
+export HF_HUB_ENABLE_HF_TRANSFER=0
 
 # 1. Train Chain-of-Thought (CoT) with Qwen2-VL-7B Teacher & Live Inspection
 echo ""
