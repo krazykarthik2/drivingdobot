@@ -1,19 +1,17 @@
 """
 dobot_real_demonstrator.py
 
-Interactive Real-Time Dobot Demonstration Recorder & On-the-Fly Fine-Tuner:
-- Single Top Camera (Index 1) with DirectShow backend (zero frame drops).
-- Keyboard teleoperation / manual arm teaching:
-  * [W / S]: Move Forward / Backward (X)
-  * [A / D]: Move Left / Right (Y)
-  * [E / C]: Move Up / Down (Z)
-  * [SPACE]: Toggle Gripper / Suction (Open / Close)
-  * [R]: Start / Stop Recording Episode
-  * [T]: Trigger Background Local Fine-Tuning of SmolVLA Action Heads
-  * [Q / ESC]: Quit
-- Live HUD displaying recording status, episode count, frame count, and Dobot telemetry.
-- Auto-saves episodes to 'real_dobot_demonstrations.pkl'.
-- Every batch of recorded episodes can be fine-tuned locally in minutes!
+Dobot Physical Hand-Teaching (Kinesthetic Demonstration) Recorder:
+- Uses Dobot's physical hand-guiding capability (press the unlock key on Dobot forearm
+  or move arm by hand smoothly while the motors comply / read joint encoders).
+- Continuously polls Dobot `get_pose()` at safe, steady intervals (~10-15 Hz) without serial flooding.
+- No W/A/S/D/E/C keyboard driving needed! You physically move the arm with your hands.
+- [SPACE]: Toggle Gripper / Suction (Open / Close) anytime during demonstration.
+- [R]: Start / Stop Recording Episode.
+- [T]: Trigger Background Local Fine-Tuning of SmolVLA Action Heads.
+- [1/2/3/4]: Switch Task Goal ('approach the lock', 'pick up lock', 'push lock right', 'home standby').
+- [Q / ESC]: Quit.
+- Auto-saves all episodes to 'real_dobot_demonstrations.pkl'.
 """
 
 import os
@@ -21,7 +19,6 @@ import sys
 import time
 import pickle
 import threading
-import queue
 import cv2
 import numpy as np
 import torch
@@ -37,7 +34,7 @@ from pydobot.message import Message
 from dobot_kinematics import DobotKinematics
 
 
-class DobotRealDemonstrator:
+class DobotHandTeachingDemonstrator:
     def __init__(self, cam_idx=1, robot_port="COM13", save_path="real_dobot_demonstrations.pkl"):
         self.cam_idx = cam_idx
         self.robot_port = robot_port
@@ -45,7 +42,7 @@ class DobotRealDemonstrator:
         self.kin = DobotKinematics()
 
         print("=" * 70)
-        print("DOBOT REAL-TIME DEMONSTRATION RECORDER & FAST LOCAL FINE-TUNER")
+        print("DOBOT PHYSICAL HAND-TEACHING RECORDER (KINESTHETIC DEMONSTRATIONS)")
         print("=" * 70)
 
         # 1. Camera Initialization with DirectShow
@@ -90,33 +87,35 @@ class DobotRealDemonstrator:
                 pass
 
             p_init = self.dobot.pose()
-            self.current_pose = list(p_init)
+            self.current_pose = [p_init[0], p_init[1], p_init[2], p_init[3]]
             self.connected = True
             print(f"[Dobot] Connected! Initial Pose: X={p_init[0]:.1f}, Y={p_init[1]:.1f}, Z={p_init[2]:.1f} mm")
-            print("[Dobot] Alarms cleared successfully.\n")
+            print("[Dobot] Alarms cleared. Hand-teaching mode active (press Dobot unlock key to guide arm by hand)!\n")
         except Exception as e:
-            print(f"[Dobot Warning] Could not connect to {self.robot_port} ({e}). Running in manual simulation mode.\n")
+            print(f"[Dobot Warning] Could not connect to {self.robot_port} ({e}). Running in offline preview mode.\n")
 
-        # 3. Load or Initialize Demonstrations Storage
+        # 3. Load Existing Demonstrations
         self.episodes = []
         if os.path.exists(self.save_path):
             try:
                 with open(self.save_path, "rb") as f:
                     self.episodes = pickle.load(f)
-                print(f"[Storage] Loaded {len(self.episodes)} existing demonstration episodes from {self.save_path}.")
+                print(f"[Storage] Loaded {len(self.episodes)} existing episodes from {self.save_path}.")
             except Exception:
                 self.episodes = []
 
-        # Current Recording State
+        # Recording State
         self.is_recording = False
         self.current_instruction = "approach the lock"
         self.curr_cam_frames = []
         self.curr_states = []
         self.curr_actions = []
 
-        # Step displacement increment (mm)
-        self.step_size = 5.0
         self.training_in_progress = False
+
+        # Dedicated safe polling thread for Dobot pose & recording transitions at ~12 Hz
+        self.record_thread = threading.Thread(target=self._pose_poller_and_recorder_loop, daemon=True)
+        self.record_thread.start()
 
     def _camera_loop(self):
         while self.running:
@@ -144,48 +143,48 @@ class DobotRealDemonstrator:
             3.0 if is_grip_closed else 15.0
         ], dtype=np.float32)
 
-    def step_arm(self, dx, dy, dz):
-        """Moves arm by delta and records step if recording is active."""
-        if not self.running:
-            return
+    def _pose_poller_and_recorder_loop(self):
+        """Continuously polls pose at ~12 Hz safely and records samples while [REC] is active."""
+        last_recorded_pos = None
 
-        # Fetch current frame before motion
-        with self.frame_lock:
-            frame = self.latest_frame.copy() if self.latest_frame is not None else None
+        while self.running:
+            t_start = time.time()
 
-        cur_x, cur_y, cur_z = self.current_pose[0], self.current_pose[1], self.current_pose[2]
-        new_x = float(np.clip(cur_x + dx, 140.0, 270.0))
-        new_y = float(np.clip(cur_y + dy, -130.0, 130.0))
-        new_z = float(np.clip(cur_z + dz, -35.0, 80.0))
+            # Safe pose query
+            if self.connected and self.dobot:
+                with self.robot_lock:
+                    try:
+                        p = self.dobot.pose()
+                        self.current_pose = [p[0], p[1], p[2], p[3]]
+                    except Exception:
+                        pass
 
-        # Record transition
-        if self.is_recording and frame is not None:
-            # Downsample and JPEG encode frame to keep dataset lean
-            f_small = cv2.resize(frame, (256, 256))
-            _, buf = cv2.imencode(".jpg", f_small, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
-            st = self.dobot_to_so100_state(cur_x, cur_y, cur_z, self.gripper_closed)
+            cur_x, cur_y, cur_z = self.current_pose[0], self.current_pose[1], self.current_pose[2]
 
-            # Compute delta action in SO-100 degrees
-            d_pan = float(- dy / 1.5)
-            d_shoulder = float(119.9 + dx * 2.0)
-            d_elbow = float(109.8 + dz * 2.5)
-            act = np.array([d_pan, d_shoulder, d_elbow, 56.7, -27.4, 3.0 if self.gripper_closed else 15.0], dtype=np.float32)
+            # If recording is active, sample step
+            if self.is_recording:
+                with self.frame_lock:
+                    frame = self.latest_frame.copy() if self.latest_frame is not None else None
 
-            self.curr_cam_frames.append(buf.tobytes())
-            self.curr_states.append(st)
-            self.curr_actions.append(act)
+                if frame is not None:
+                    # Check if arm moved or gripper changed or min interval elapsed
+                    f_small = cv2.resize(frame, (256, 256))
+                    _, buf = cv2.imencode(".jpg", f_small, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+                    st = self.dobot_to_so100_state(cur_x, cur_y, cur_z, self.gripper_closed)
 
-        # Move physical arm
-        self.current_pose[0] = new_x
-        self.current_pose[1] = new_y
-        self.current_pose[2] = new_z
+                    # SO-100 mapped action state
+                    d_pan = float(- cur_y / 1.5)
+                    d_shoulder = float(119.9 + (cur_x - 190.0) * 1.5)
+                    d_elbow = float(109.8 + (cur_z - 35.0) * 2.0)
+                    act = np.array([d_pan, d_shoulder, d_elbow, 56.7, -27.4, 3.0 if self.gripper_closed else 15.0], dtype=np.float32)
 
-        if self.connected and self.dobot:
-            with self.robot_lock:
-                try:
-                    self.dobot.move_to(new_x, new_y, new_z, 0.0, wait=False)
-                except Exception:
-                    pass
+                    self.curr_cam_frames.append(buf.tobytes())
+                    self.curr_states.append(st)
+                    self.curr_actions.append(act)
+                    last_recorded_pos = (cur_x, cur_y, cur_z)
+
+            elapsed = time.time() - t_start
+            time.sleep(max(0.01, 0.08 - elapsed))  # ~12 Hz steady sampling
 
     def toggle_gripper(self):
         """Toggles end-effector gripper/suction."""
@@ -203,15 +202,17 @@ class DobotRealDemonstrator:
         """Starts or stops recording the current demonstration episode."""
         if not self.is_recording:
             # Start recording
-            self.is_recording = True
             self.curr_cam_frames = []
             self.curr_states = []
             self.curr_actions = []
-            print(f"\n[REC START] Recording episode {len(self.episodes) + 1} for: '{self.current_instruction}'")
+            self.is_recording = True
+            print(f"\n>>> [REC START] Recording Episode {len(self.episodes) + 1} for '{self.current_instruction}'...")
+            print("    Move Dobot smoothly by hand now. Press [SPACE] for gripper.")
         else:
             # Stop and save episode
             self.is_recording = False
-            if len(self.curr_actions) >= 3:
+            steps = len(self.curr_actions)
+            if steps >= 5:
                 ep = {
                     "cam1": self.curr_cam_frames,
                     "cam2": [b"" for _ in self.curr_cam_frames],
@@ -223,13 +224,13 @@ class DobotRealDemonstrator:
                 self.episodes.append(ep)
                 with open(self.save_path, "wb") as f:
                     pickle.dump(self.episodes, f)
-                print(f"[REC SAVED] Episode {len(self.episodes)} saved! ({len(self.curr_actions)} steps). Saved to {self.save_path}\n")
+                print(f">>> [REC SAVED] Episode {len(self.episodes)} saved! ({steps} steps recorded).")
+                print(f"    Saved to: {self.save_path}\n")
 
-                # Auto-prompt batch fine-tuning every 5 episodes
                 if len(self.episodes) % 5 == 0:
-                    print(f"*** Milestone: {len(self.episodes)} episodes captured! Press [T] to fine-tune now! ***")
+                    print(f"*** Batch Milestone: {len(self.episodes)} episodes collected! Press [T] to fine-tune! ***\n")
             else:
-                print("[REC DISCARDED] Episode had fewer than 3 steps.\n")
+                print(f"[REC DISCARDED] Episode had only {steps} steps (need at least 5).\n")
 
     def trigger_background_finetune(self):
         """Runs fast local fine-tuning of the 12M action heads in the background."""
@@ -247,8 +248,13 @@ class DobotRealDemonstrator:
                 print(f"[FINE-TUNING START] Training SmolVLA Action Heads on {len(self.episodes)} real demonstrations...")
                 print("=" * 65)
                 import train_smolvla_local
-                # Run fast 3-epoch local adaptation
-                train_smolvla_local.train_local(epochs=3, batch_size=4, grad_accum_steps=2, lr=2e-4)
+                train_smolvla_local.train_local(
+                    data_path=self.save_path,
+                    epochs=3,
+                    batch_size=4,
+                    grad_accum_steps=2,
+                    lr=2e-4
+                )
                 print("\n[FINE-TUNING COMPLETE] New fine-tuned heads saved to smolvla_no_wrist_dobot/smolvla_no_wrist_heads.pt!\n")
             except Exception as e:
                 print(f"[Fine-Tuning Error]: {e}")
@@ -259,19 +265,19 @@ class DobotRealDemonstrator:
         t.start()
 
     def run(self):
-        window_title = "Dobot Magician Demonstration Recorder"
+        window_title = "Dobot Hand-Teaching Recorder (Kinesthetic Guiding)"
         cv2.namedWindow(window_title, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(window_title, 800, 600)
 
-        print("\nCONTROLS:")
-        print("  [W / S]:      Forward / Backward (X +/-)")
-        print("  [A / D]:      Left / Right (Y +/-)")
-        print("  [E / C]:      Up / Down (Z +/-)")
-        print("  [SPACE]:      Toggle Gripper / Suction")
-        print("  [R]:          Start / Stop Recording Episode")
-        print("  [T]:          Trigger Fast Local Fine-Tuning")
-        print("  [1/2/3/4]:    Change Instruction (1: approach lock, 2: pick lock, 3: push right, 4: home)")
-        print("  [Q / ESC]:    Quit\n")
+        print("\nHOW TO RECORD DEMOS:")
+        print("  1. Press unlock button on Dobot arm (or guide arm by hand).")
+        print("  2. [R]:       Start recording (REC indicator turns RED).")
+        print("  3. Guide arm smoothly to target.")
+        print("  4. [SPACE]:   Toggle Gripper / Suction.")
+        print("  5. [R]:       Stop recording -> Automatically saved!")
+        print("  6. [T]:       Fine-Tune locally whenever you want!")
+        print("  7. [1/2/3/4]: Change Goal (1: approach lock, 2: pick lock, 3: push right, 4: home)")
+        print("  8. [Q / ESC]: Quit\n")
 
         while self.running:
             with self.frame_lock:
@@ -284,22 +290,23 @@ class DobotRealDemonstrator:
             disp = frame.copy()
             h, w = disp.shape[:2]
 
-            # HUD Telemetry Overlay
-            # Top banner
+            # Top Telemetry Banner
             status_color = (0, 0, 255) if self.is_recording else (0, 200, 0)
-            status_text = f"REC (Steps: {len(self.curr_actions)})" if self.is_recording else "STANDBY"
-            cv2.rectangle(disp, (0, 0), (w, 40), (20, 20, 20), -1)
-            cv2.putText(disp, f"STATUS: {status_text}", (15, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
-            cv2.putText(disp, f"Total Episodes: {len(self.episodes)}", (w - 240, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            status_text = f"REC ACTIVE (Steps: {len(self.curr_actions)})" if self.is_recording else "STANDBY (Hand-Guide Ready)"
+            cv2.rectangle(disp, (0, 0), (w, 42), (20, 20, 20), -1)
+            cv2.putText(disp, f"{status_text}", (15, 29), cv2.FONT_HERSHEY_SIMPLEX, 0.72, status_color, 2)
+            cv2.putText(disp, f"Saved Demos: {len(self.episodes)}", (w - 230, 29), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
-            # Instruction and Robot Pose
-            cv2.putText(disp, f"Goal: '{self.current_instruction}'", (15, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
+            # Instruction and Live Pose from Encoders
+            cv2.putText(disp, f"Goal: '{self.current_instruction}'", (15, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
             x, y, z = self.current_pose[0], self.current_pose[1], self.current_pose[2]
-            cv2.putText(disp, f"Pose: X={x:.1f} Y={y:.1f} Z={z:.1f} mm | Grip={'CLOSED' if self.gripper_closed else 'OPEN'}",
-                        (15, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1)
+            grip_txt = "CLOSED" if self.gripper_closed else "OPEN"
+            cv2.putText(disp, f"Live Arm Pose: X={x:.1f} Y={y:.1f} Z={z:.1f} mm | Grip={grip_txt}",
+                        (15, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (220, 220, 220), 1)
 
             if self.training_in_progress:
-                cv2.putText(disp, "*** LOCAL FINE-TUNING IN PROGRESS... ***", (15, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 140, 255), 2)
+                cv2.rectangle(disp, (10, h - 45), (w - 10, h - 10), (0, 80, 200), -1)
+                cv2.putText(disp, "*** LOCAL FINE-TUNING IN PROGRESS... ***", (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
             cv2.imshow(window_title, disp)
             key = cv2.waitKey(20) & 0xFF
@@ -313,18 +320,6 @@ class DobotRealDemonstrator:
                 self.toggle_recording()
             elif key in [ord('t'), ord('T')]:
                 self.trigger_background_finetune()
-            elif key in [ord('w'), ord('W')]:
-                self.step_arm(+self.step_size, 0.0, 0.0)
-            elif key in [ord('s'), ord('S')]:
-                self.step_arm(-self.step_size, 0.0, 0.0)
-            elif key in [ord('a'), ord('A')]:
-                self.step_arm(0.0, +self.step_size, 0.0)  # Left
-            elif key in [ord('d'), ord('D')]:
-                self.step_arm(0.0, -self.step_size, 0.0)  # Right
-            elif key in [ord('e'), ord('E')]:
-                self.step_arm(0.0, 0.0, +self.step_size)  # Up
-            elif key in [ord('c'), ord('C')]:
-                self.step_arm(0.0, 0.0, -self.step_size)  # Down
             elif key == ord('1'):
                 self.current_instruction = "approach the lock"
                 print(f"[Instruction] Changed to: '{self.current_instruction}'")
@@ -349,5 +344,5 @@ class DobotRealDemonstrator:
 
 
 if __name__ == "__main__":
-    app = DobotRealDemonstrator()
+    app = DobotHandTeachingDemonstrator()
     app.run()
