@@ -172,6 +172,8 @@ class RealDobotTwinSynchronizer:
                 except Exception:
                     pass
         return self.current_real_pose
+
+    def sim_proj(self, pt_3d):
         """Projects 3D simulation coordinate [x, y, z] to 2D screen coordinate [u, v]."""
         clip = self.VP @ np.array([pt_3d[0], pt_3d[1], pt_3d[2], 1.0])
         ndc = clip[:3] / clip[3]
