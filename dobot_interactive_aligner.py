@@ -208,6 +208,7 @@ class DobotInteractiveAligner:
             cv2.putText(sim_bgr, f'SIM {tid}', (c_px[0] - 22, c_px[1] - 16), cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1)
 
         # Crosshair in the exact center of the 4 markers
+        z_table = -0.048
         center_4 = self.sim_proj([0.116, 0.0, z_table])
         cv2.drawMarker(sim_bgr, (center_4[0], center_4[1]), (0, 255, 0), cv2.MARKER_CROSS, 20, 2)
         cv2.putText(sim_bgr, "CENTER", (center_4[0] - 25, center_4[1] + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
