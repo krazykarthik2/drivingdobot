@@ -35,6 +35,7 @@ if not hasattr(transformers.utils, 'torch_compilable_check'):
 
 import pydobot
 from pydobot.message import Message
+from dobot_clean import clean_dobot, get_clean_dobot
 from transformers import AutoTokenizer
 from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 from dobot_kinematics import DobotKinematics
@@ -68,26 +69,17 @@ class RealDobotSmolVLAController:
         self.cur_x, self.cur_y, self.cur_z = 190.0, 0.0, 40.0
         self.gripper_closed = False
 
-        try:
-            self.dobot = pydobot.Dobot(port=robot_port, verbose=False)
-            # Reliable alarm clearance on startup
-            m = Message()
-            m.id = 20
-            m.ctrl = 1
-            m.params = bytearray([])
-            self.dobot._send_message(m)
-            time.sleep(0.05)
+        self.dobot = get_clean_dobot(port=robot_port, verbose=True)
+        if self.dobot:
             try:
-                self.dobot._read_message()
-            except Exception:
-                pass
-
-            p_init = self.dobot.pose()
-            self.cur_x, self.cur_y, self.cur_z = p_init[0], p_init[1], p_init[2]
-            self.connected = True
-            print(f"[Dobot] Connected successfully! Pose: [{self.cur_x:.1f}, {self.cur_y:.1f}, {self.cur_z:.1f}] mm\n")
-        except Exception as e:
-            print(f"[Dobot Warning] Could not connect to {robot_port} ({e}). Running in DRY-RUN mode.\n")
+                p_init = self.dobot.pose()
+                self.cur_x, self.cur_y, self.cur_z = p_init[0], p_init[1], p_init[2]
+                self.connected = True
+                print(f"[Dobot] Connected successfully! Pose: [{self.cur_x:.1f}, {self.cur_y:.1f}, {self.cur_z:.1f}] mm\n")
+            except Exception as e:
+                print(f"[Dobot Warning] Could not read pose: {e}")
+        else:
+            print(f"[Dobot Warning] Could not connect to {robot_port}. Running in DRY-RUN mode.\n")
 
         # 3. Load Fine-Tuned SmolVLA Policy
         print(f"[3/3] Loading Fine-Tuned SmolVLA Policy from {heads_path}...")

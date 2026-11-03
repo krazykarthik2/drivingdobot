@@ -31,6 +31,7 @@ os.environ['HF_HUB_OFFLINE'] = '1'
 
 import pydobot
 from pydobot.message import Message
+from dobot_clean import clean_dobot, get_clean_dobot
 from dobot_kinematics import DobotKinematics
 
 
@@ -72,27 +73,18 @@ class DobotHandTeachingDemonstrator:
         self.current_pose = [190.0, 0.0, 35.0, 0.0]
         self.gripper_closed = False
 
-        try:
-            self.dobot = pydobot.Dobot(port=self.robot_port, verbose=False)
-            # Reliable alarm clearance on startup
-            m = Message()
-            m.id = 20
-            m.ctrl = 1
-            m.params = bytearray([])
-            self.dobot._send_message(m)
-            time.sleep(0.05)
+        self.dobot = get_clean_dobot(port=self.robot_port, verbose=True)
+        if self.dobot:
             try:
-                self.dobot._read_message()
-            except Exception:
-                pass
-
-            p_init = self.dobot.pose()
-            self.current_pose = [p_init[0], p_init[1], p_init[2], p_init[3]]
-            self.connected = True
-            print(f"[Dobot] Connected! Initial Pose: X={p_init[0]:.1f}, Y={p_init[1]:.1f}, Z={p_init[2]:.1f} mm")
-            print("[Dobot] Alarms cleared. Hand-teaching mode active (press Dobot unlock key to guide arm by hand)!\n")
-        except Exception as e:
-            print(f"[Dobot Warning] Could not connect to {self.robot_port} ({e}). Running in offline preview mode.\n")
+                p_init = self.dobot.pose()
+                self.current_pose = [p_init[0], p_init[1], p_init[2], p_init[3]]
+                self.connected = True
+                print(f"[Dobot] Connected! Initial Pose: X={p_init[0]:.1f}, Y={p_init[1]:.1f}, Z={p_init[2]:.1f} mm")
+                print("[Dobot] Alarms cleared & queues started. Hand-teaching mode active!\n")
+            except Exception as e:
+                print(f"[Dobot Warning] Could not read pose: {e}")
+        else:
+            print(f"[Dobot Warning] Could not connect to {self.robot_port}. Running in offline preview mode.\n")
 
         # 3. Load Existing Demonstrations
         self.episodes = []
