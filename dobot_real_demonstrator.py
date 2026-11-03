@@ -103,7 +103,32 @@ class DobotHandTeachingDemonstrator:
         self.curr_states = []
         self.curr_actions = []
 
+        # Target suggestion area & Start point for guided demo collection
+        self.target_zones = [
+            {"name": "Right Zone", "rect": (400, 200, 180, 180), "color": (0, 165, 255), "desc": "Lock Target Area (Right)"},
+            {"name": "Center Zone", "rect": (230, 220, 180, 180), "color": (0, 255, 0), "desc": "Lock Target Area (Center)"},
+            {"name": "Left Zone", "rect": (60, 200, 180, 180), "color": (255, 144, 30), "desc": "Lock Target Area (Left)"},
+        ]
+        self.current_zone_idx = 0
+        self.pick_new_random_zone()
+
         self.training_in_progress = False
+
+    def pick_new_random_zone(self):
+        """Picks a random placement zone, biasing towards right/center if right is lacking."""
+        import random
+        # Random choice from available target zones
+        self.current_zone_idx = random.randint(0, len(self.target_zones) - 1)
+        # Add slight random jitter within the region
+        base_x, base_y, bw, bh = self.target_zones[self.current_zone_idx]["rect"]
+        jx = random.randint(-25, 25)
+        jy = random.randint(-25, 25)
+        self.active_target_box = (
+            max(20, base_x + jx),
+            max(100, base_y + jy),
+            bw,
+            bh
+        )
 
         # Dedicated safe polling thread for Dobot pose & recording transitions at ~12 Hz
         self.record_thread = threading.Thread(target=self._pose_poller_and_recorder_loop, daemon=True)
@@ -219,6 +244,9 @@ class DobotHandTeachingDemonstrator:
                 print(f">>> [REC SAVED] Episode {len(self.episodes)} saved! ({steps} steps recorded).")
                 print(f"    Saved to: {self.save_path}\n")
 
+                # Pick a new randomized zone for the next demo
+                self.pick_new_random_zone()
+
                 if len(self.episodes) % 5 == 0:
                     print(f"*** Batch Milestone: {len(self.episodes)} episodes collected! Press [T] to fine-tune! ***\n")
             else:
@@ -296,6 +324,27 @@ class DobotHandTeachingDemonstrator:
             cv2.putText(disp, f"Live Arm Pose: X={x:.1f} Y={y:.1f} Z={z:.1f} mm | Grip={grip_txt}",
                         (15, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (220, 220, 220), 1)
 
+            # Draw Recommended Start Point of Arm (e.g. Home Standby: X=190, Y=0, Z=40)
+            start_px, start_py = int(w * 0.50), int(h * 0.82)
+            cv2.circle(disp, (start_px, start_py), 18, (0, 255, 255), 2)
+            cv2.circle(disp, (start_px, start_py), 4, (0, 255, 255), -1)
+            cv2.putText(disp, "RECOMMENDED ARM START", (start_px - 95, start_py + 32),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
+
+            # Draw Randomized Target Area for Lock Placement
+            tx, ty, tw, th = self.active_target_box
+            zone_info = self.target_zones[self.current_zone_idx]
+            zone_color = zone_info["color"]
+            # Semi-transparent overlay for the target box
+            overlay = disp.copy()
+            cv2.rectangle(overlay, (tx, ty), (tx + tw, ty + th), zone_color, -1)
+            cv2.addWeighted(overlay, 0.22, disp, 0.78, 0, disp)
+            cv2.rectangle(disp, (tx, ty), (tx + tw, ty + th), zone_color, 2)
+            cv2.putText(disp, f"PLACE LOCK HERE ({zone_info['name']})", (tx + 8, ty + 24),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2)
+            cv2.putText(disp, "[N]: New Random Area", (tx + 8, ty + 45),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.42, zone_color, 1)
+
             if self.training_in_progress:
                 cv2.rectangle(disp, (10, h - 45), (w - 10, h - 10), (0, 80, 200), -1)
                 cv2.putText(disp, "*** LOCAL FINE-TUNING IN PROGRESS... ***", (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
@@ -310,6 +359,9 @@ class DobotHandTeachingDemonstrator:
                 self.toggle_gripper()
             elif key in [ord('r'), ord('R')]:
                 self.toggle_recording()
+            elif key in [ord('n'), ord('N')]:
+                self.pick_new_random_zone()
+                print(f"[Zone] Switched to new random target zone: {self.target_zones[self.current_zone_idx]['name']}")
             elif key in [ord('t'), ord('T')]:
                 self.trigger_background_finetune()
             elif key == ord('1'):

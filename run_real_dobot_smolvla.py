@@ -241,6 +241,21 @@ class RealDobotSmolVLAController:
                     dy = float(np.clip(dy, -15.0, 15.0))
                     dz = float(np.clip(dz, -8.0, 8.0))
 
+                    # Discrepancy & Jerk Detection (Human intervention / external bump / jerk):
+                    # Check if actual physical pose matches what we commanded previously
+                    if self.connected and self.dobot:
+                        try:
+                            p_now = self.dobot.pose()
+                            disp_dev = np.linalg.norm([p_now[0] - self.cur_x, p_now[1] - self.cur_y, p_now[2] - self.cur_z])
+                            if disp_dev > 15.0:
+                                # External jerk or human moved the arm -> abort stale ensembled sub-plan immediately!
+                                print(f"    [Jerk/Intervention Detected] Displacement {disp_dev:.1f} mm > 15 mm! Resyncing and recalculating next frame...")
+                                self.cur_x, self.cur_y, self.cur_z = p_now[0], p_now[1], p_now[2]
+                                break
+                            self.cur_x, self.cur_y, self.cur_z = p_now[0], p_now[1], p_now[2]
+                        except Exception:
+                            pass
+
                     target_x = float(np.clip(self.cur_x + dx, 150.0, 260.0))
                     target_y = float(np.clip(self.cur_y + dy, -120.0, 120.0))
                     target_z = float(np.clip(self.cur_z + dz, -30.0, 75.0))
@@ -256,9 +271,8 @@ class RealDobotSmolVLAController:
                                 self.gripper_closed = should_grip
                                 self.dobot.grip(self.gripper_closed)
                                 self.dobot.suck(self.gripper_closed)
-                            # Update tracked pose
-                            p_now = self.dobot.pose()
-                            self.cur_x, self.cur_y, self.cur_z = p_now[0], p_now[1], p_now[2]
+                            # Update tracked pose to commanded
+                            self.cur_x, self.cur_y, self.cur_z = target_x, target_y, target_z
                         except Exception as e:
                             print(f"    [Move Error]: {e}")
                     else:
