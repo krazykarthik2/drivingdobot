@@ -233,37 +233,22 @@ class RealDobotSmolVLAController:
                     total_steps += 1
                     act = action_chunk[s_idx]
 
-                    # Pure Cartesian Relative Delta Actions (dx, dy, dz, grip)
-                    # Apply flow-velocity boost gain (2.5x) so continuous flow matches physical travel
-                    gain = 25.0
-                    dx = float(act[0]) * gain
-                    dy = float(act[1]) * gain
-                    dz = float(act[2]) * gain
+                    # LeRobot SO-100 Joint Actions to Dobot Magician Cartesian Kinematics
+                    # act is standard 6D SO-100 state: [pan_deg, shoulder, elbow, wrist_pitch, wrist_roll, grip]
+                    pan_deg = float(act[0]) * 2.45
+                    shoulder_val = float(act[1])
+                    elbow_val = float(act[2])
                     grip_cmd = float(act[5]) if len(act) > 5 else 15.0
 
-                    # Safe single-step velocity limits (mm per step at 10 Hz)
-                    dx = float(np.clip(dx, -25.0, 25.0))
-                    dy = float(np.clip(dy, -25.0, 25.0))
-                    dz = float(np.clip(dz, -15.0, 15.0))
-
-                    # Discrepancy & Jerk Detection (Human intervention / external bump):
-                    # Check if actual physical pose deviates excessively (> 35mm) from expected trajectory
-                    if self.connected and self.dobot:
-                        try:
-                            p_now = self.dobot.pose()
-                            disp_dev = np.linalg.norm([p_now[0] - self.cur_x, p_now[1] - self.cur_y, p_now[2] - self.cur_z])
-                            if disp_dev > 35.0:
-                                # External jerk or human grabbed the arm -> abort stale ensembled sub-plan immediately!
-                                print(f"    [Human Intervention/Bump] Displacement {disp_dev:.1f} mm > 35 mm! Recalculating next visual frame...")
-                                self.cur_x, self.cur_y, self.cur_z = p_now[0], p_now[1], p_now[2]
-                                break
-                            self.cur_x, self.cur_y, self.cur_z = p_now[0], p_now[1], p_now[2]
-                        except Exception:
-                            pass
-
-                    target_x = float(np.clip(self.cur_x + dx, 150.0, 260.0))
-                    target_y = float(np.clip(self.cur_y + dy, -120.0, 120.0))
-                    target_z = float(np.clip(self.cur_z + dz, -30.0, 75.0))
+                    # Convert pan angle to lateral Y displacement:
+                    # In Dobot kinematics, Y = r * sin(theta_base). Forward radius ~200mm.
+                    rad = np.deg2rad(pan_deg)
+                    target_y = float(- 200.0 * np.sin(rad))
+                    target_x = float(200.0 * np.cos(rad))
+                    # Map shoulder/elbow to forward X and vertical Z
+                    target_x = float(np.clip(190.0 + (shoulder_val - 119.9) * 0.8, 150.0, 260.0))
+                    target_z = float(np.clip(35.0 + (elbow_val - 109.8) * 0.6, -30.0, 75.0))
+                    target_y = float(np.clip(target_y, -120.0, 120.0))
 
                     # Pure unadulterated model output:
                     # In SO-100 / LeRobot format: 15.0 = OPEN, 3.0 = CLOSED.

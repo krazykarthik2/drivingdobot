@@ -117,8 +117,8 @@ def train_gpu(epochs: int = 12, batch_size: int = 8, lr: float = 3e-4, cfg_dropo
             # 50% probability horizontal flip guarantees exact 50/50 Left/Right dataset balance
             if np.random.rand() > 0.5:
                 cam1 = cv2.flip(cam1, 1)        # Horizontal image flip (Left becomes Right)
-                action[:, 1] = - action[:, 1]    # Invert dY velocity (Left delta becomes Right delta)
-                state[0] = - state[0]            # Invert base pan orientation angle
+                action[:, 0] = - action[:, 0]    # Invert base pan action angle
+                state[0] = - state[0]            # Invert base pan state angle
 
             # Photometric jitter
             if np.random.rand() > 0.3:
