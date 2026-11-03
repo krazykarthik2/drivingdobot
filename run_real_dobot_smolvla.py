@@ -235,7 +235,7 @@ class RealDobotSmolVLAController:
 
                     # Pure Cartesian Relative Delta Actions (dx, dy, dz, grip)
                     # Apply flow-velocity boost gain (2.5x) so continuous flow matches physical travel
-                    gain = 2.5
+                    gain = 25.0
                     dx = float(act[0]) * gain
                     dy = float(act[1]) * gain
                     dz = float(act[2]) * gain
@@ -265,7 +265,16 @@ class RealDobotSmolVLAController:
                     target_y = float(np.clip(self.cur_y + dy, -120.0, 120.0))
                     target_z = float(np.clip(self.cur_z + dz, -30.0, 75.0))
 
-                    should_grip = (grip_cmd < 8.0)
+                    # Approach Task Gripper & Descent Logic:
+                    # For 'approach' instructions, gripper must remain OPEN until physically grasping
+                    is_approach_task = "approach" in self.instruction.lower() or "reach" in self.instruction.lower()
+                    if is_approach_task:
+                        should_grip = False
+                        # Ensure arm descends downward toward tabletop (dz <= 0) when approaching object
+                        if dz > 0.5:
+                            dz = - 0.5
+                    else:
+                        should_grip = (grip_cmd < 5.0)
 
                     print(f"  Step {s_idx + 1}/{steps_to_exec}: Delta=[dX={dx:+.1f}, dY={dy:+.1f}, dZ={dz:+.1f} mm] -> Target: [{target_x:.1f}, {target_y:.1f}, {target_z:.1f}] | Grip={should_grip}")
 
