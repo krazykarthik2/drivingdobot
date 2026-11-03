@@ -233,27 +233,34 @@ class RealDobotSmolVLAController:
                     total_steps += 1
                     act = action_chunk[s_idx]
 
-                    # LeRobot SO-100 Joint Actions to Dobot Magician Cartesian Kinematics
-                    # act is standard 6D SO-100 state: [pan_deg, shoulder, elbow, wrist_pitch, wrist_roll, grip]
-                    pan_deg = float(act[0]) * 2.45
-                    shoulder_val = float(act[1])
-                    elbow_val = float(act[2])
-                    grip_cmd = float(act[5]) if len(act) > 5 else 15.0
+                    # Standard LeRobot Output Denormalization:
+                    # SmolVLA outputs zero-mean unit-variance normalized actions: y = (x - mean) / std
+                    # We must unnormalize using the official SO-100 dataset parameters:
+                    # Action = norm_act * std + mean
+                    so100_mean = np.array([1.5959, 119.9442, 109.7698, 56.7055, -27.4227, 12.0028], dtype=np.float32)
+                    so100_std  = np.array([26.3918, 52.4114, 49.8538, 36.9983, 59.3600, 19.0400], dtype=np.float32)
 
-                    # Convert pan angle to lateral Y displacement:
-                    # In Dobot kinematics, Y = r * sin(theta_base). Forward radius ~200mm.
-                    rad = np.deg2rad(pan_deg)
-                    target_y = float(- 200.0 * np.sin(rad))
-                    target_x = float(200.0 * np.cos(rad))
-                    # Map shoulder/elbow to forward X and vertical Z
-                    target_x = float(np.clip(190.0 + (shoulder_val - 119.9) * 0.8, 150.0, 260.0))
-                    target_z = float(np.clip(35.0 + (elbow_val - 109.8) * 0.6, -30.0, 75.0))
-                    target_y = float(np.clip(target_y, -120.0, 120.0))
+                    raw_so100 = np.array(act[:6], dtype=np.float32)
+                    unnorm_act = raw_so100 * so100_std + so100_mean
 
-                    # Pure unadulterated model output:
-                    # In SO-100 / LeRobot format: 15.0 = OPEN, 3.0 = CLOSED.
-                    # Middle decision boundary is 9.0.
-                    should_grip = bool(grip_cmd < 9.0)
+                    pan_so100    = float(unnorm_act[0])
+                    shoulder_val = float(unnorm_act[1])
+                    elbow_val    = float(unnorm_act[2])
+                    grip_cmd     = float(unnorm_act[5])
+
+                    # In Dobot kinematics:
+                    # pan_so100 = - rad2deg(theta_base) / 2.45
+                    # theta_base (deg) = - pan_so100 * 2.45
+                    theta_base_deg = float(- pan_so100 * 2.45)
+                    rad = np.deg2rad(theta_base_deg)
+
+                    # Workspace radial tracking (distance ~200mm)
+                    target_x = float(np.clip(185.0 + (shoulder_val - 119.9) * 0.7, 150.0, 260.0))
+                    target_y = float(np.clip(200.0 * np.sin(rad), -120.0, 120.0))
+                    target_z = float(np.clip(35.0 + (elbow_val - 109.8) * 0.5, -30.0, 75.0))
+
+                    # Physical Gripper command (SO-100: 15.0 = OPEN, 3.0 = CLOSED)
+                    should_grip = bool(grip_cmd < 8.0)
 
                     dx = target_x - self.cur_x
                     dy = target_y - self.cur_y
