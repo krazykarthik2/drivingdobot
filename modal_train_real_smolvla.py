@@ -1,13 +1,15 @@
 """
 modal_train_real_smolvla.py
 
-Advanced SmolVLA LoRA & Action Flow Fine-Tuning on Modal Cloud GPU (A10G):
+Advanced SmolVLA Action Flow-Matching Fine-Tuning on Modal Cloud GPU (A10G):
+- VLM Backbone (Vision + Language Transformer) is 100% FROZEN (ZERO LoRA / ZERO changes to pretrained visual-semantic representations).
+- Only the 12M Continuous Action Flow-Matching Heads are fine-tuned:
+  (state_proj, action_in_proj, action_out_proj, action_time_mlp_in, action_time_mlp_out)
 Incorporates:
 1. Classifier-Free Guidance (CFG): 15% random language dropout during training for strong conditioning.
 2. Optimal Transport Flow-Matching with Min-SNR Loss Weighting: Prioritizes middle decisional velocities.
 3. Exponential Moving Average (EMA) of Weights: Polyak averaging (decay=0.995) for jitter-free deployment.
 4. Multi-Scale Random Patch Drop (Cutout/Erasing): Robustness against gripper arm self-occlusion.
-5. Parameter-Efficient LoRA on Vision-Language Backbone + Action Flow Heads.
 """
 
 import os
@@ -182,7 +184,7 @@ def train_gpu(epochs: int = 12, batch_size: int = 8, lr: float = 3e-4, cfg_dropo
             param.requires_grad = True
 
     trainable_params = sum(p.numel() for p in policy.parameters() if p.requires_grad)
-    print(f"[Modal GPU] LoRA / Action Head Parameters: {trainable_params / 1e6:.2f}M")
+    print(f"[Modal GPU] Frozen VLM Backbone! Fine-tuning ONLY Action Flow Heads: {trainable_params / 1e6:.2f}M params")
 
     optimizer = optim.AdamW([p for p in policy.parameters() if p.requires_grad], lr=lr, weight_decay=1e-4)
 
