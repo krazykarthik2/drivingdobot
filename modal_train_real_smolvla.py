@@ -113,27 +113,25 @@ def train_gpu(epochs: int = 12, batch_size: int = 8, lr: float = 3e-4, cfg_dropo
             if np.random.rand() < cfg_dropout_prob:
                 instr = ""
 
+            # Controlled Reflection Symmetry: Horizontal Mirroring (O(2) Unbiasing)
+            # 50% probability horizontal flip guarantees exact 50/50 Left/Right dataset balance
+            if np.random.rand() > 0.5:
+                cam1 = cv2.flip(cam1, 1)        # Horizontal image flip (Left becomes Right)
+                action[:, 1] = - action[:, 1]    # Invert dY velocity (Left delta becomes Right delta)
+                state[0] = - state[0]            # Invert base pan orientation angle
+
             # Photometric jitter
             if np.random.rand() > 0.3:
                 alpha = np.random.uniform(0.8, 1.2)
                 beta = np.random.uniform(-20, 20)
                 cam1 = np.clip(cam1 * alpha + beta, 0, 255).astype(np.uint8)
 
-            # SE(2) Continuous Rotational & Spatial Equivariance
-            if np.random.rand() > 0.2:
-                angle_deg = np.random.uniform(-35.0, 35.0)
-                angle_rad = np.deg2rad(angle_deg)
-                cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
-                rot_mat_2d = np.array([[cos_a, -sin_a], [sin_a, cos_a]], dtype=np.float32)
-
-                action[:, :2] = action[:, :2] @ rot_mat_2d.T
-
+            # Spatial jitter (slight translation robustness)
+            if np.random.rand() > 0.3:
                 h, w = cam1.shape[:2]
-                dx_t = np.random.uniform(-25.0, 25.0)
-                dy_t = np.random.uniform(-15.0, 15.0)
-                M = cv2.getRotationMatrix2D((w / 2, h / 2), angle_deg, 1.0)
-                M[0, 2] += dx_t
-                M[1, 2] += dy_t
+                dx_t = np.random.uniform(-15.0, 15.0)
+                dy_t = np.random.uniform(-10.0, 10.0)
+                M = np.float32([[1, 0, dx_t], [0, 1, dy_t]])
                 cam1 = cv2.warpAffine(cam1, M, (w, h), borderMode=cv2.BORDER_REFLECT)
 
             # Technique 5: Multi-Scale Patch Drop / Random Erasing (Occlusion Robustness)

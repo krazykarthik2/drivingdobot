@@ -101,6 +101,7 @@ class DobotHandTeachingDemonstrator:
         self.current_instruction = "approach the lock"
         self.curr_cam_frames = []
         self.curr_states = []
+        self.curr_raw_poses = []
         self.curr_actions = []
 
         # Target suggestion area & Start point for guided demo collection
@@ -161,8 +162,8 @@ class DobotHandTeachingDemonstrator:
         ], dtype=np.float32)
 
     def _pose_poller_and_recorder_loop(self):
-        """Continuously polls pose at ~12 Hz safely and records samples while [REC] is active."""
-        last_recorded_pos = None
+        """Continuously polls pose at precise 10.0 Hz and records relative delta actions."""
+        dt_target = 0.10  # 10.0 Hz precise robotic sampling rate
 
         while self.running:
             t_start = time.time()
@@ -184,24 +185,16 @@ class DobotHandTeachingDemonstrator:
                     frame = self.latest_frame.copy() if self.latest_frame is not None else None
 
                 if frame is not None:
-                    # Check if arm moved or gripper changed or min interval elapsed
                     f_small = cv2.resize(frame, (256, 256))
                     _, buf = cv2.imencode(".jpg", f_small, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
                     st = self.dobot_to_so100_state(cur_x, cur_y, cur_z, self.gripper_closed)
 
-                    # SO-100 mapped action state
-                    d_pan = float(- cur_y / 1.5)
-                    d_shoulder = float(119.9 + (cur_x - 190.0) * 1.5)
-                    d_elbow = float(109.8 + (cur_z - 35.0) * 2.0)
-                    act = np.array([d_pan, d_shoulder, d_elbow, 56.7, -27.4, 3.0 if self.gripper_closed else 15.0], dtype=np.float32)
-
                     self.curr_cam_frames.append(buf.tobytes())
                     self.curr_states.append(st)
-                    self.curr_actions.append(act)
-                    last_recorded_pos = (cur_x, cur_y, cur_z)
+                    self.curr_raw_poses.append((cur_x, cur_y, cur_z, self.gripper_closed))
 
             elapsed = time.time() - t_start
-            time.sleep(max(0.01, 0.08 - elapsed))  # ~12 Hz steady sampling
+            time.sleep(max(0.005, dt_target - elapsed))  # Strict 10.0 Hz cadence
 
     def toggle_gripper(self):
         """Toggles end-effector gripper/suction."""
@@ -221,36 +214,52 @@ class DobotHandTeachingDemonstrator:
             # Start recording
             self.curr_cam_frames = []
             self.curr_states = []
-            self.curr_actions = []
+            self.curr_raw_poses = []
             self.is_recording = True
             print(f"\n>>> [REC START] Recording Episode {len(self.episodes) + 1} for '{self.current_instruction}'...")
             print("    Move Dobot smoothly by hand now. Press [SPACE] for gripper.")
         else:
             # Stop and save episode
             self.is_recording = False
-            steps = len(self.curr_actions)
-            if steps >= 5:
+            total_samples = len(self.curr_raw_poses)
+            if total_samples >= 5:
+                # Compute true step-by-step relative delta actions (dX, dY, dZ, grip)
+                actions = []
+                for i in range(total_samples):
+                    if i < total_samples - 1:
+                        p_next = self.curr_raw_poses[i + 1]
+                        p_curr = self.curr_raw_poses[i]
+                        dx = float(p_next[0] - p_curr[0])
+                        dy = float(p_next[1] - p_curr[1])
+                        dz = float(p_next[2] - p_curr[2])
+                    else:
+                        dx, dy, dz = 0.0, 0.0, 0.0
+                    grip_val = 3.0 if self.curr_raw_poses[i][3] else 15.0
+                    # Pure Cartesian Relative Action Vector: [dx, dy, dz, 0.0, 0.0, grip]
+                    act = np.array([dx, dy, dz, 0.0, 0.0, grip_val], dtype=np.float32)
+                    actions.append(act)
+
                 ep = {
                     "cam1": self.curr_cam_frames,
                     "cam2": [b"" for _ in self.curr_cam_frames],
                     "cam3": [b"" for _ in self.curr_cam_frames],
                     "states": self.curr_states,
-                    "actions": self.curr_actions,
-                    "instructions": [self.current_instruction for _ in self.curr_actions]
+                    "actions": actions,
+                    "instructions": [self.current_instruction for _ in actions]
                 }
                 self.episodes.append(ep)
                 with open(self.save_path, "wb") as f:
                     pickle.dump(self.episodes, f)
-                print(f">>> [REC SAVED] Episode {len(self.episodes)} saved! ({steps} steps recorded).")
+                print(f">>> [REC SAVED] Episode {len(self.episodes)} saved! ({len(actions)} relative delta steps at 10 Hz).")
                 print(f"    Saved to: {self.save_path}\n")
 
                 # Pick a new randomized zone for the next demo
                 self.pick_new_random_zone()
 
                 if len(self.episodes) % 5 == 0:
-                    print(f"*** Batch Milestone: {len(self.episodes)} episodes collected! Press [T] to fine-tune! ***\n")
+                    print(f"*** Batch Milestone: {len(self.episodes)} episodes collected! Run modal trainer! ***\n")
             else:
-                print(f"[REC DISCARDED] Episode had only {steps} steps (need at least 5).\n")
+                print(f"[REC DISCARDED] Episode had only {total_samples} steps (need at least 5).\n")
 
     def trigger_background_finetune(self):
         """Runs fast local fine-tuning of the 12M action heads in the background."""

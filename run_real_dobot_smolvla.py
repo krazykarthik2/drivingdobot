@@ -226,17 +226,13 @@ class RealDobotSmolVLAController:
                     total_steps += 1
                     act = action_chunk[s_idx]
 
-                    # Relative Delta Actions: Pan maps to lateral dy, shoulder/elbow to dx/dz
-                    d_pan = float(act[0])
-                    d_shoulder = float(act[1])
-                    d_elbow = float(act[2])
+                    # Pure Cartesian Relative Delta Actions (dx, dy, dz, grip)
+                    dx = float(act[0])
+                    dy = float(act[1])
+                    dz = float(act[2])
                     grip_cmd = float(act[5]) if len(act) > 5 else 15.0
 
-                    dy = float(- d_pan * 1.5)
-                    dx = float((d_shoulder - 119.9) * 0.6)
-                    dz = float((d_elbow - 109.8) * 0.5)
-
-                    # Safe step bounds
+                    # Safe single-step velocity limits (mm per 100ms step at 10 Hz)
                     dx = float(np.clip(dx, -12.0, 12.0))
                     dy = float(np.clip(dy, -15.0, 15.0))
                     dz = float(np.clip(dz, -8.0, 8.0))
@@ -278,8 +274,8 @@ class RealDobotSmolVLAController:
                     else:
                         self.cur_x, self.cur_y, self.cur_z = target_x, target_y, target_z
 
-                    # Smooth 20 Hz temporal progression
-                    time.sleep(0.05)
+                    # Smooth 10 Hz temporal progression (matched with 10 Hz demonstration rate)
+                    time.sleep(0.10)
 
                 # Telemetry HUD
                 disp = frame.copy()
