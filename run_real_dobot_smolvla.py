@@ -48,6 +48,11 @@ class RealDobotSmolVLAController:
         print("=" * 70)
 
         self.device = torch.device("cpu")
+        # Utilize all CPU cores for maximum inference speed
+        try:
+            torch.set_num_threads(os.cpu_count() or 8)
+        except Exception:
+            pass
         self.kin = DobotKinematics()
 
         # 1. Camera Initialization with DirectShow
@@ -88,6 +93,10 @@ class RealDobotSmolVLAController:
 
         self.tokenizer = AutoTokenizer.from_pretrained(tok_path, local_files_only=True)
         self.policy = SmolVLAPolicy.from_pretrained(pol_path, local_files_only=True)
+
+        # Acceleration: Optimize Euler flow-matching integration steps (10 -> 2 steps)
+        # Optimal Transport flow-matching follows straight trajectories; 2 steps yield 5x speedup
+        self.policy.config.num_steps = 2
 
         if os.path.exists(heads_path):
             print(f"[SmolVLA] Injecting real-demonstration trained flow-matching heads from {heads_path}...")
@@ -175,11 +184,11 @@ class RealDobotSmolVLAController:
             act = np.expand_dims(act, axis=0)
         return act
 
-    def run_closed_loop(self, task="approach the lock", ensemble_steps=8):
+    def run_closed_loop(self, task="approach the lock", ensemble_steps=15):
         """
         Continuous Closed-loop execution with Temporal Ensembling:
         Runs continuously in real-time until you press [Q] or [ESC] to stop.
-        Executes an ensemble receding horizon of 'ensemble_steps' (e.g. 8 steps) smoothly
+        Executes an ensemble receding horizon of 'ensemble_steps' (15 steps = 1.5s smooth continuous movement)
         before capturing the next camera frame.
         """
         self.set_task(task)
@@ -237,15 +246,15 @@ class RealDobotSmolVLAController:
                     dy = float(np.clip(dy, -15.0, 15.0))
                     dz = float(np.clip(dz, -8.0, 8.0))
 
-                    # Discrepancy & Jerk Detection (Human intervention / external bump / jerk):
-                    # Check if actual physical pose matches what we commanded previously
+                    # Discrepancy & Jerk Detection (Human intervention / external bump):
+                    # Check if actual physical pose deviates excessively (> 35mm) from expected trajectory
                     if self.connected and self.dobot:
                         try:
                             p_now = self.dobot.pose()
                             disp_dev = np.linalg.norm([p_now[0] - self.cur_x, p_now[1] - self.cur_y, p_now[2] - self.cur_z])
-                            if disp_dev > 15.0:
-                                # External jerk or human moved the arm -> abort stale ensembled sub-plan immediately!
-                                print(f"    [Jerk/Intervention Detected] Displacement {disp_dev:.1f} mm > 15 mm! Resyncing and recalculating next frame...")
+                            if disp_dev > 35.0:
+                                # External jerk or human grabbed the arm -> abort stale ensembled sub-plan immediately!
+                                print(f"    [Human Intervention/Bump] Displacement {disp_dev:.1f} mm > 35 mm! Recalculating next visual frame...")
                                 self.cur_x, self.cur_y, self.cur_z = p_now[0], p_now[1], p_now[2]
                                 break
                             self.cur_x, self.cur_y, self.cur_z = p_now[0], p_now[1], p_now[2]
