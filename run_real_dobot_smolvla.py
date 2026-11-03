@@ -279,7 +279,7 @@ class RealDobotSmolVLAController:
                 disp = frame.copy()
                 cv2.rectangle(disp, (0, 0), (640, 45), (20, 20, 20), -1)
                 cv2.putText(disp, f"SmolVLA Goal: '{self.instruction}'", (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(disp, f"Cycle {cycle}/{max_cycles} (Steps: {total_steps})", (430, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+                cv2.putText(disp, f"Cycle {cycle} (Steps: {total_steps})", (430, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
                 cv2.putText(disp, f"Pose: [{self.cur_x:.1f}, {self.cur_y:.1f}, {self.cur_z:.1f}] mm | Grip: {'CLOSED' if self.gripper_closed else 'OPEN'}",
                             (15, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
 
