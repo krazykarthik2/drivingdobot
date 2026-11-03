@@ -255,6 +255,10 @@ class RealDobotSmolVLAController:
                     # Middle decision boundary is 9.0.
                     should_grip = bool(grip_cmd < 9.0)
 
+                    dx = target_x - self.cur_x
+                    dy = target_y - self.cur_y
+                    dz = target_z - self.cur_z
+
                     print(f"  Step {s_idx + 1}/{steps_to_exec}: Delta=[dX={dx:+.1f}, dY={dy:+.1f}, dZ={dz:+.1f} mm] -> Target: [{target_x:.1f}, {target_y:.1f}, {target_z:.1f}] | Grip={should_grip}")
 
                     if self.connected and self.dobot:
