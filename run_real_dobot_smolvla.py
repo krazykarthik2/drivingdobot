@@ -184,12 +184,10 @@ class RealDobotSmolVLAController:
             act = np.expand_dims(act, axis=0)
         return act
 
-    def run_closed_loop(self, task="approach the lock", ensemble_steps=15):
+    def run_closed_loop(self, task="approach the lock", ensemble_steps=1):
         """
-        Continuous Closed-loop execution with Temporal Ensembling:
-        Runs continuously in real-time until you press [Q] or [ESC] to stop.
-        Executes an ensemble receding horizon of 'ensemble_steps' (15 steps = 1.5s smooth continuous movement)
-        before capturing the next camera frame.
+        Closed-loop execution with Direct Single-Step Action Execution (Temporal Ensembling Disabled):
+        Executes immediate single action step per visual observation frame.
         """
         self.set_task(task)
 
