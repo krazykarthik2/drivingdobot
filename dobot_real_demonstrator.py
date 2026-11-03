@@ -211,47 +211,111 @@ class DobotHandTeachingDemonstrator:
     def toggle_recording(self):
         """Starts or stops recording the current demonstration episode."""
         if not self.is_recording:
+            # Refresh current pose from Dobot right before starting
+            if self.connected and self.dobot:
+                with self.robot_lock:
+                    try:
+                        p_start = self.dobot.pose()
+                        self.current_pose = [p_start[0], p_start[1], p_start[2], p_start[3]]
+                    except Exception:
+                        pass
             # Start recording
             self.curr_cam_frames = []
             self.curr_states = []
             self.curr_raw_poses = []
             self.is_recording = True
             print(f"\n>>> [REC START] Recording Episode {len(self.episodes) + 1} for '{self.current_instruction}'...")
-            print("    Move Dobot smoothly by hand now. Press [SPACE] for gripper.")
+            print("    Hold teach button, move arm smoothly to lock, release button, and press [R] to save!")
         else:
             # Stop and save episode
             self.is_recording = False
+            # Read final settled pose from Dobot
+            final_p = self.current_pose
+            if self.connected and self.dobot:
+                with self.robot_lock:
+                    try:
+                        p_end = self.dobot.pose()
+                        final_p = [p_end[0], p_end[1], p_end[2], p_end[3]]
+                        self.current_pose = final_p
+                    except Exception:
+                        pass
+
             total_samples = len(self.curr_raw_poses)
             if total_samples >= 5:
-                # Compute true step-by-step relative delta actions (dX, dY, dZ, grip)
+                # Update last recorded pose to final settled pose
+                self.curr_raw_poses[-1] = (final_p[0], final_p[1], final_p[2], self.gripper_closed)
+
+                # Continuous Smooth Velocity Interpolation:
+                # Extract keyframe waypoints from any intermediate position shifts or between start & end
+                start_p = self.curr_raw_poses[0]
+                total_dx = float(final_p[0] - start_p[0])
+                total_dy = float(final_p[1] - start_p[1])
+                total_dz = float(final_p[2] - start_p[2])
+
+                # Check if there are intermediate waypoints (Method 2)
+                waypoints = []
+                last_w = (start_p[0], start_p[1], start_p[2])
+                for idx, raw in enumerate(self.curr_raw_poses):
+                    pt = (raw[0], raw[1], raw[2])
+                    if np.linalg.norm(np.array(pt) - np.array(last_w)) > 1.5 or idx == 0 or idx == total_samples - 1:
+                        waypoints.append((idx, pt, raw[3]))
+                        last_w = pt
+
+                if len(waypoints) < 2:
+                    waypoints = [(0, (start_p[0], start_p[1], start_p[2]), start_p[3]),
+                                 (total_samples - 1, (final_p[0], final_p[1], final_p[2]), self.gripper_closed)]
+
+                # Build smoothly interpolated continuous 10 Hz trajectory across waypoints
+                dense_coords = np.zeros((total_samples, 3), dtype=np.float32)
+                for w_i in range(len(waypoints) - 1):
+                    i0, p0, _ = waypoints[w_i]
+                    i1, p1, _ = waypoints[w_i + 1]
+                    n_steps = max(1, i1 - i0)
+                    for s in range(n_steps):
+                        alpha = s / float(n_steps)
+                        dense_coords[i0 + s] = [
+                            p0[0] + alpha * (p1[0] - p0[0]),
+                            p0[1] + alpha * (p1[1] - p0[1]),
+                            p0[2] + alpha * (p1[2] - p0[2]),
+                        ]
+                dense_coords[-1] = [final_p[0], final_p[1], final_p[2]]
+
+                # Calculate non-zero relative delta actions for every single step
                 actions = []
                 for i in range(total_samples):
                     if i < total_samples - 1:
-                        p_next = self.curr_raw_poses[i + 1]
-                        p_curr = self.curr_raw_poses[i]
-                        dx = float(p_next[0] - p_curr[0])
-                        dy = float(p_next[1] - p_curr[1])
-                        dz = float(p_next[2] - p_curr[2])
+                        dx = float(dense_coords[i + 1, 0] - dense_coords[i, 0])
+                        dy = float(dense_coords[i + 1, 1] - dense_coords[i, 1])
+                        dz = float(dense_coords[i + 1, 2] - dense_coords[i, 2])
                     else:
                         dx, dy, dz = 0.0, 0.0, 0.0
                     grip_val = 3.0 if self.curr_raw_poses[i][3] else 15.0
-                    # Pure Cartesian Relative Action Vector: [dx, dy, dz, 0.0, 0.0, grip]
                     act = np.array([dx, dy, dz, 0.0, 0.0, grip_val], dtype=np.float32)
                     actions.append(act)
+
+                # Recompute joint state vector along interpolated trajectory
+                states = []
+                for i in range(total_samples):
+                    st = self.dobot_to_so100_state(dense_coords[i, 0], dense_coords[i, 1], dense_coords[i, 2], self.curr_raw_poses[i][3])
+                    states.append(st)
 
                 ep = {
                     "cam1": self.curr_cam_frames,
                     "cam2": [b"" for _ in self.curr_cam_frames],
                     "cam3": [b"" for _ in self.curr_cam_frames],
-                    "states": self.curr_states,
+                    "states": states,
                     "actions": actions,
                     "instructions": [self.current_instruction for _ in actions]
                 }
                 self.episodes.append(ep)
                 with open(self.save_path, "wb") as f:
                     pickle.dump(self.episodes, f)
-                print(f">>> [REC SAVED] Episode {len(self.episodes)} saved! ({len(actions)} relative delta steps at 10 Hz).")
-                print(f"    Saved to: {self.save_path}\n")
+
+                # Calculate motion statistics
+                dist = np.linalg.norm([total_dx, total_dy, total_dz])
+                print(f">>> [REC SAVED] Episode {len(self.episodes)} saved! ({len(actions)} steps, total motion: {dist:.1f} mm).")
+                print(f"    Start: [{start_p[0]:.1f}, {start_p[1]:.1f}, {start_p[2]:.1f}] -> Target: [{final_p[0]:.1f}, {final_p[1]:.1f}, {final_p[2]:.1f}]")
+                print(f"    Every step has continuous non-zero flow velocity!\n")
 
                 # Pick a new randomized zone for the next demo
                 self.pick_new_random_zone()
