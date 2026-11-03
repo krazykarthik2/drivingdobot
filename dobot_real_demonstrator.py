@@ -321,7 +321,7 @@ class DobotHandTeachingDemonstrator:
 
             # Top Telemetry Banner
             status_color = (0, 0, 255) if self.is_recording else (0, 200, 0)
-            status_text = f"REC ACTIVE (Steps: {len(self.curr_actions)})" if self.is_recording else "STANDBY (Hand-Guide Ready)"
+            status_text = f"REC ACTIVE (Steps: {len(self.curr_raw_poses)})" if self.is_recording else "STANDBY (Hand-Guide Ready)"
             cv2.rectangle(disp, (0, 0), (w, 42), (20, 20, 20), -1)
             cv2.putText(disp, f"{status_text}", (15, 29), cv2.FONT_HERSHEY_SIMPLEX, 0.72, status_color, 2)
             cv2.putText(disp, f"Saved Demos: {len(self.episodes)}", (w - 230, 29), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
