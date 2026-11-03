@@ -25,6 +25,14 @@ sys.modules['jaxlib'] = None
 sys.modules['tensorflow'] = None
 os.environ['HF_HUB_OFFLINE'] = '1'
 
+import huggingface_hub
+if not hasattr(huggingface_hub, 'sync_bucket'):
+    huggingface_hub.sync_bucket = None
+
+import transformers.utils
+if not hasattr(transformers.utils, 'torch_compilable_check'):
+    transformers.utils.torch_compilable_check = lambda: False
+
 import pydobot
 from pydobot.message import Message
 from transformers import AutoTokenizer
