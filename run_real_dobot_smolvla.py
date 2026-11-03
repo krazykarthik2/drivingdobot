@@ -288,21 +288,6 @@ class RealDobotSmolVLAController:
                 except Exception:
                     pass
             print(f"\n[Done] Closed-loop execution completed ({total_steps} smooth steps executed).")
-                            (15, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
-
-                cv2.imshow(window_title, disp)
-                key = cv2.waitKey(40) & 0xFF
-                if key in [27, ord('q')]:
-                    break
-
-        finally:
-            self.cap.release()
-            cv2.destroyAllWindows()
-            if self.connected and self.dobot:
-                try:
-                    self.dobot.close()
-                except Exception:
-                    pass
             print(f"\n[Done] Closed-loop execution completed after {step} steps.")
 
 
