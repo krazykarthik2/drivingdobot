@@ -272,12 +272,19 @@ class RealDobotSmolVLAController:
                 cv2.rectangle(disp, (0, 0), (640, 45), (20, 20, 20), -1)
                 cv2.putText(disp, f"SmolVLA Goal: '{self.instruction}'", (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                 cv2.putText(disp, f"Cycle {cycle} (Steps: {total_steps})", (430, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
-                cv2.putText(disp, f"Pose: [{self.cur_x:.1f}, {self.cur_y:.1f}, {self.cur_z:.1f}] mm | Grip: {'CLOSED' if self.gripper_closed else 'OPEN'}",
+                cv2.putText(disp, f"Pose: [{self.cur_x:.1f}, {self.cur_y:.1f}, {self.cur_z:.1f}] mm | Grip: {'CLOSED' if self.gripper_closed else 'OPEN'} | [C] Clean",
                             (15, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
 
                 cv2.imshow(window_title, disp)
                 key = cv2.waitKey(20) & 0xFF
-                if key in [27, ord('q')]:
+                if key in [ord('c'), ord('C')]:
+                    print("\n[User Command] 'C' pressed -> Running instant Dobot alarm & queue cleanup...")
+                    if self.connected and self.dobot:
+                        clean_dobot(self.dobot)
+                        p_now = self.dobot.pose()
+                        self.cur_x, self.cur_y, self.cur_z = p_now[0], p_now[1], p_now[2]
+                        print(f"[Dobot Cleaned] Updated pose: [{self.cur_x:.1f}, {self.cur_y:.1f}, {self.cur_z:.1f}]\n")
+                elif key in [27, ord('q')]:
                     break
 
         finally:
