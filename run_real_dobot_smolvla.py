@@ -183,9 +183,10 @@ class RealDobotSmolVLAController:
             act = np.expand_dims(act, axis=0)
         return act
 
-    def run_closed_loop(self, task="approach the lock", max_cycles=30, ensemble_steps=8):
+    def run_closed_loop(self, task="approach the lock", ensemble_steps=8):
         """
-        Closed-loop execution with Temporal Ensembling:
+        Continuous Closed-loop execution with Temporal Ensembling:
+        Runs continuously in real-time until you press [Q] or [ESC] to stop.
         Executes an ensemble receding horizon of 'ensemble_steps' (e.g. 8 steps) smoothly
         before capturing the next camera frame.
         """
@@ -197,11 +198,11 @@ class RealDobotSmolVLAController:
 
         total_steps = 0
         cycle = 0
-        print(f"\nStarting Temporal Ensembled Closed-Loop Control! (Horizon={ensemble_steps} steps/cycle)")
-        print("Press [Q] or [ESC] in window to stop anytime.\n")
+        print(f"\nStarting Continuous SmolVLA Closed-Loop Control! (Horizon={ensemble_steps} steps/cycle)")
+        print("Runs continuously. Press [Q] or [ESC] in window anytime to stop.\n")
 
         try:
-            while cycle < max_cycles:
+            while True:
                 ret, frame = self.cap.read()
                 if not ret or frame is None:
                     time.sleep(0.01)
@@ -227,7 +228,7 @@ class RealDobotSmolVLAController:
 
                 # Temporal Ensembling: Execute the first `ensemble_steps` smoothly
                 steps_to_exec = min(ensemble_steps, len(action_chunk))
-                print(f"[Cycle {cycle:02d}/{max_cycles}] Predicted 50-step flow chunk (in {dt:.2f}s). Ensembling {steps_to_exec} steps:")
+                print(f"[Cycle {cycle:03d}] Predicted 50-step flow chunk (in {dt:.2f}s). Ensembling {steps_to_exec} steps:")
 
                 for s_idx in range(steps_to_exec):
                     total_steps += 1
@@ -296,7 +297,6 @@ class RealDobotSmolVLAController:
                 except Exception:
                     pass
             print(f"\n[Done] Closed-loop execution completed ({total_steps} smooth steps executed).")
-            print(f"\n[Done] Closed-loop execution completed after {step} steps.")
 
 
 if __name__ == "__main__":
