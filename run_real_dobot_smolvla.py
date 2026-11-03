@@ -236,15 +236,17 @@ class RealDobotSmolVLAController:
                     act = action_chunk[s_idx]
 
                     # Pure Cartesian Relative Delta Actions (dx, dy, dz, grip)
-                    dx = float(act[0])
-                    dy = float(act[1])
-                    dz = float(act[2])
+                    # Apply flow-velocity boost gain (2.5x) so continuous flow matches physical travel
+                    gain = 2.5
+                    dx = float(act[0]) * gain
+                    dy = float(act[1]) * gain
+                    dz = float(act[2]) * gain
                     grip_cmd = float(act[5]) if len(act) > 5 else 15.0
 
-                    # Safe single-step velocity limits (mm per 100ms step at 10 Hz)
-                    dx = float(np.clip(dx, -12.0, 12.0))
-                    dy = float(np.clip(dy, -15.0, 15.0))
-                    dz = float(np.clip(dz, -8.0, 8.0))
+                    # Safe single-step velocity limits (mm per step at 10 Hz)
+                    dx = float(np.clip(dx, -25.0, 25.0))
+                    dy = float(np.clip(dy, -25.0, 25.0))
+                    dz = float(np.clip(dz, -15.0, 15.0))
 
                     # Discrepancy & Jerk Detection (Human intervention / external bump):
                     # Check if actual physical pose deviates excessively (> 35mm) from expected trajectory
